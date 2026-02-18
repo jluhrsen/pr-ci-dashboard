@@ -2,6 +2,8 @@
 
 👻🚫 Dashboard for viewing and retesting failed OpenShift PR CI jobs.
 
+![Flake Buster Dashboard](screenshot.png)
+
 ## Quick Start
 
 ```bash
