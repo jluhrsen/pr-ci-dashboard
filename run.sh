@@ -53,7 +53,6 @@ cd "$TMP_DIR"
 echo "Downloading pr-ci-dashboard..."
 curl -fsSL https://github.com/jluhrsen/pr-ci-dashboard/archive/refs/heads/main.tar.gz | \
     tar xz --strip-components=1 pr-ci-dashboard-main
-cd pr-ci-dashboard
 
 # Create virtual environment
 echo "Creating virtual environment..."
