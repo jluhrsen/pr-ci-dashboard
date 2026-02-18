@@ -51,8 +51,8 @@ cd "$TMP_DIR"
 
 # Download pr-ci-dashboard folder from GitHub
 echo "Downloading pr-ci-dashboard..."
-curl -fsSL https://github.com/jluhrsen/workBits/archive/refs/heads/main.tar.gz | \
-    tar xz --strip-components=1 workBits-main/pr-ci-dashboard
+curl -fsSL https://github.com/jluhrsen/pr-ci-dashboard/archive/refs/heads/main.tar.gz | \
+    tar xz --strip-components=1 pr-ci-dashboard-main
 cd pr-ci-dashboard
 
 # Create virtual environment

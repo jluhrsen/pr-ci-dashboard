@@ -5,7 +5,7 @@
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jluhrsen/workBits/main/pr-ci-dashboard/run.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jluhrsen/pr-ci-dashboard/main/run.sh | sh
 ```
 
 Open **http://localhost:5000**
@@ -15,7 +15,7 @@ Press Ctrl+C to stop and clean up.
 ### With Custom Search
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jluhrsen/workBits/main/pr-ci-dashboard/run.sh | sh -s -- author:jluhrsen repo:openshift/ovn-kubernetes
+curl -fsSL https://raw.githubusercontent.com/jluhrsen/pr-ci-dashboard/main/run.sh | sh -s -- author:jluhrsen repo:openshift/ovn-kubernetes
 ```
 
 ## Prerequisites
@@ -30,8 +30,8 @@ curl -fsSL https://raw.githubusercontent.com/jluhrsen/workBits/main/pr-ci-dashbo
 ## Manual Installation
 
 ```bash
-git clone https://github.com/jluhrsen/workBits.git
-cd workBits/pr-ci-dashboard
+git clone https://github.com/jluhrsen/pr-ci-dashboard.git
+cd pr-ci-dashboard
 pip install -r requirements.txt
 python server.py [search-args...]
 ```

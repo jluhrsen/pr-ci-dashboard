@@ -1577,7 +1577,7 @@ Dashboard to see PR job failures and retest them.
 
 ```bash
 # Clone repository
-cd /home/jamoluhrsen/repos/RedHat/workbits/pr-ci-dashboard
+cd /home/jamoluhrsen/repos/RedHat/openshift/pr-ci-dashboard
 
 # Install dependencies
 pip install -r requirements.txt

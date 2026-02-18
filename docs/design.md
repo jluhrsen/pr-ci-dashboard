@@ -97,7 +97,7 @@ def fetch_scripts_on_startup():
 
 **Local development server:**
 ```bash
-cd /home/jamoluhrsen/repos/RedHat/workbits/pr-ci-dashboard
+cd /home/jamoluhrsen/repos/RedHat/pr-ci-dashboard/pr-ci-dashboard
 python server.py --author:jluhrsen --repo:openshift/ovn-kubernetes
 ```
 
@@ -776,5 +776,5 @@ pr-ci-dashboard/
 
 This dashboard simplifies PR CI monitoring by aggregating job status, highlighting alarming failure patterns, and enabling one-click retests. By fetching bash scripts from the ai-helpers repository and using the local `gh` CLI, the implementation stays lean with minimal dependencies. The design leaves room for future AI-powered analysis while delivering immediate value to developers managing multiple OpenShift PRs.
 
-**Repository:** `/home/jamoluhrsen/repos/RedHat/workbits/pr-ci-dashboard`
+**Repository:** `/home/jamoluhrsen/repos/RedHat/pr-ci-dashboard/pr-ci-dashboard`
 **Script Source:** https://github.com/openshift-eng/ai-helpers/pull/177
