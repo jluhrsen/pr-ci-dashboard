@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flake Buster - PR CI Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="sidebar">
+        <h1>👻🚫 Flake Buster</h1>
+        <button class="btn" id="refresh-btn">Refresh</button>
+    </div>
+
+    <div class="main-content">
+        <div class="top-bar">
+            <input type="text" id="search-input" class="search-input" placeholder="Loading default query..." style="flex: 1;">
+            <button class="btn" id="search-btn">Search</button>
+        </div>
+
+        <div id="auth-banner" class="banner hidden"></div>
+
+        <div class="container">
+
+            <div id="pr-cards-container"></div>
+
+            <button class="btn btn-secondary hidden" id="load-more-btn">
+                Load More (<span id="current-count">0</span> of <span id="total-count">0</span>)
+            </button>
+        </div>
+
+        <div class="toast-container" id="toast-container"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
