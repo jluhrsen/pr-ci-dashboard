@@ -263,7 +263,7 @@ function renderJobItems(list, failedJobs, owner, repo, number, jobType) {
 
     failedJobs.forEach(job => {
         const jobItem = createElement('div', 'job-item');
-        const jobName = createElement('div', 'job-name', `❌ ${job.name} (${job.consecutive} consecutive)`);
+        const jobName = createJobNameWithLinks(job);
         const jobActions = createElement('div', 'job-actions');
 
         const retestBtn = createRetestButton(job, owner, repo, number, jobType);
@@ -279,6 +279,40 @@ function renderJobItems(list, failedJobs, owner, repo, number, jobType) {
     });
 
     return activeRetestCount;
+}
+
+function createJobNameWithLinks(job) {
+    const jobName = createElement('div', 'job-name');
+
+    // Add job name prefix
+    jobName.appendChild(document.createTextNode(`❌ ${job.name} (`));
+
+    // Create clickable links for each consecutive failure
+    if (job.urls && job.urls.length > 0) {
+        job.urls.forEach((url, index) => {
+            if (index > 0) {
+                jobName.appendChild(document.createTextNode(','));
+            }
+
+            const link = createElement('a', 'failure-link', (index + 1).toString(), {
+                href: url,
+                target: '_blank'
+            });
+            link.style.color = 'var(--primary)';
+            link.style.textDecoration = 'underline';
+            link.style.marginLeft = index === 0 ? '0' : '2px';
+            link.style.marginRight = '2px';
+
+            jobName.appendChild(link);
+        });
+
+        jobName.appendChild(document.createTextNode(' consecutive)'));
+    } else {
+        // Fallback if no URLs (shouldn't happen with new scripts)
+        jobName.appendChild(document.createTextNode(`${job.consecutive} consecutive)`));
+    }
+
+    return jobName;
 }
 
 function createRetestButton(job, owner, repo, number, jobType) {

@@ -3,11 +3,12 @@ import os
 import requests
 
 # Script source can be configured via environment variable
-# Default: PR #177 branch (development - scripts not yet merged to main)
-# Production: Set AI_HELPERS_BRANCH=main after PR #177 merges
-# TODO: Change default to 'main' after PR #177 merges to ai-helpers repository
-AI_HELPERS_BRANCH = os.environ.get('AI_HELPERS_BRANCH', 'refs/pull/177/head')
-BASE_URL = f"https://raw.githubusercontent.com/openshift-eng/ai-helpers/{AI_HELPERS_BRANCH}/plugins/ci/skills"
+# Default: jluhrsen fork with --json flag support for URL extraction
+# Production: Will change to openshift-eng/ai-helpers main after PRs merge
+# TODO: Update to openshift-eng/ai-helpers main branch after PRs merge
+AI_HELPERS_REPO = os.environ.get('AI_HELPERS_REPO', 'jluhrsen/ai-helpers')
+AI_HELPERS_BRANCH = os.environ.get('AI_HELPERS_BRANCH', 'add-job-urls-to-retest-scripts')
+BASE_URL = f"https://raw.githubusercontent.com/{AI_HELPERS_REPO}/{AI_HELPERS_BRANCH}/plugins/ci/skills"
 
 SCRIPT_DIR = "/tmp/pr-ci-dashboard-scripts"
 
