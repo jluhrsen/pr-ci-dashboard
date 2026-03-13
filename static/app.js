@@ -15,6 +15,9 @@ const DOM = {
     searchInput: null,
     searchBtn: null,
     refreshBtn: null,
+    loadMoreBtn: null,
+    currentCountSpan: null,
+    totalCountSpan: null,
     authBanner: null,
     prContainer: null,
     toastContainer: null
@@ -32,6 +35,9 @@ async function init() {
     DOM.searchInput = document.getElementById('search-input');
     DOM.searchBtn = document.getElementById('search-btn');
     DOM.refreshBtn = document.getElementById('refresh-btn');
+    DOM.loadMoreBtn = document.getElementById('load-more-btn');
+    DOM.currentCountSpan = document.getElementById('current-count');
+    DOM.totalCountSpan = document.getElementById('total-count');
     DOM.authBanner = document.getElementById('auth-banner');
     DOM.prContainer = document.getElementById('pr-cards-container');
     DOM.toastContainer = document.getElementById('toast-container');
@@ -50,14 +56,26 @@ async function init() {
     await executeSearch(defaultQuery.query);
 
     // Set up event listeners
-    DOM.searchBtn.addEventListener('click', () => executeSearch(DOM.searchInput.value));
+    DOM.searchBtn.addEventListener('click', () => {
+        currentPage = 1;
+        DOM.prContainer.innerHTML = '';
+        executeSearch(DOM.searchInput.value);
+    });
     DOM.searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') executeSearch(DOM.searchInput.value);
+        if (e.key === 'Enter') {
+            currentPage = 1;
+            DOM.prContainer.innerHTML = '';
+            executeSearch(DOM.searchInput.value);
+        }
     });
     DOM.refreshBtn.addEventListener('click', () => {
         currentPage = 1;
         DOM.prContainer.innerHTML = '';
         executeSearch(DOM.searchInput.value);
+    });
+    DOM.loadMoreBtn.addEventListener('click', () => {
+        currentPage++;
+        executeSearch(DOM.searchInput.value, true);
     });
 }
 
@@ -105,14 +123,16 @@ function isJobRetesting(owner, repo, number, jobName) {
 // ========================================
 // Search & PR Rendering
 // ========================================
-async function executeSearch(query) {
-    showLoading('Searching PRs...');
+async function executeSearch(query, append = false) {
+    if (!append) {
+        showLoading('Searching PRs...');
+    }
 
     try {
         const response = await fetch('/api/search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, page: currentPage, per_page: 10 })
+            body: JSON.stringify({ query, page: currentPage, per_page: 30 })
         });
 
         const data = await response.json();
@@ -123,11 +143,16 @@ async function executeSearch(query) {
             return;
         }
 
-        currentPRs = data.prs;
+        if (append) {
+            currentPRs = [...currentPRs, ...data.prs];
+        } else {
+            currentPRs = data.prs;
+        }
         totalResults = data.total;
 
         hideLoading();
-        renderPRCards(data.prs);
+        renderPRCards(data.prs, append);
+        updateLoadMoreButton();
     } catch (error) {
         console.error('Search failed:', error);
         showToast('Search failed: ' + error.message, 'error');
@@ -135,8 +160,8 @@ async function executeSearch(query) {
     }
 }
 
-function renderPRCards(prs) {
-    if (prs.length === 0) {
+function renderPRCards(prs, append = false) {
+    if (!append && prs.length === 0) {
         DOM.prContainer.innerHTML = '<div class="loading">No PRs found</div>';
         return;
     }
@@ -146,6 +171,20 @@ function renderPRCards(prs) {
         DOM.prContainer.appendChild(card);
         loadPRJobs(pr.owner, pr.repo, pr.number, card);
     });
+}
+
+function updateLoadMoreButton() {
+    const currentCount = currentPRs.length;
+    const hasMore = currentCount < totalResults;
+
+    DOM.currentCountSpan.textContent = currentCount;
+    DOM.totalCountSpan.textContent = totalResults;
+
+    if (hasMore) {
+        DOM.loadMoreBtn.classList.remove('hidden');
+    } else {
+        DOM.loadMoreBtn.classList.add('hidden');
+    }
 }
 
 // ========================================
