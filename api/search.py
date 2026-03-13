@@ -8,6 +8,9 @@ def search_prs(query: str, page: int = 1, per_page: int = 10) -> dict:
     """
     Search PRs using GitHub CLI.
 
+    Note: GitHub CLI doesn't support pagination, so we fetch up to 1000 results
+    and implement pagination client-side.
+
     Returns:
         {
             "prs": [
@@ -27,9 +30,10 @@ def search_prs(query: str, page: int = 1, per_page: int = 10) -> dict:
     """
     try:
         # Use gh search to find PRs
-        # Split query into separate arguments to avoid quoting issues
+        # GitHub CLI doesn't support pagination, so fetch more results upfront
+        # Note: GitHub API limits search results to 1000 max
         query_args = shlex.split(query) if query else []
-        cmd = ["gh", "search", "prs"] + query_args + ["--limit", str(per_page), "--json", "number,title,repository,author,createdAt,state"]
+        cmd = ["gh", "search", "prs"] + query_args + ["--limit", "1000", "--json", "number,title,repository,author,createdAt,state"]
 
         result = subprocess.run(
             cmd,
@@ -44,7 +48,7 @@ def search_prs(query: str, page: int = 1, per_page: int = 10) -> dict:
         raw_prs = json.loads(result.stdout)
 
         # Transform to our format
-        prs = []
+        all_prs = []
         for pr in raw_prs:
             repo_full = pr.get("repository", {})
             # Parse owner/repo from nameWithOwner (e.g., "openshift/ovn-kubernetes")
@@ -55,7 +59,7 @@ def search_prs(query: str, page: int = 1, per_page: int = 10) -> dict:
                 owner = ""
                 repo = repo_full.get("name", "")
 
-            prs.append({
+            all_prs.append({
                 "number": pr.get("number"),
                 "title": pr.get("title", ""),
                 "owner": owner,
@@ -65,7 +69,13 @@ def search_prs(query: str, page: int = 1, per_page: int = 10) -> dict:
                 "state": pr.get("state", "UNKNOWN")
             })
 
-        return {"prs": prs, "total": len(prs)}
+        # Implement pagination on the results
+        total = len(all_prs)
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        prs = all_prs[start_idx:end_idx]
+
+        return {"prs": prs, "total": total}
 
     except Exception as e:
         return {"error": str(e), "prs": [], "total": 0}
