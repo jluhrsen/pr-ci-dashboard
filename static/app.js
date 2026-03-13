@@ -16,8 +16,7 @@ const DOM = {
     searchBtn: null,
     refreshBtn: null,
     loadMoreBtn: null,
-    currentCountSpan: null,
-    totalCountSpan: null,
+    loadMoreText: null,
     authBanner: null,
     prContainer: null,
     toastContainer: null
@@ -36,8 +35,7 @@ async function init() {
     DOM.searchBtn = document.getElementById('search-btn');
     DOM.refreshBtn = document.getElementById('refresh-btn');
     DOM.loadMoreBtn = document.getElementById('load-more-btn');
-    DOM.currentCountSpan = document.getElementById('current-count');
-    DOM.totalCountSpan = document.getElementById('total-count');
+    DOM.loadMoreText = document.getElementById('load-more-text');
     DOM.authBanner = document.getElementById('auth-banner');
     DOM.prContainer = document.getElementById('pr-cards-container');
     DOM.toastContainer = document.getElementById('toast-container');
@@ -176,9 +174,9 @@ function renderPRCards(prs, append = false) {
 function updateLoadMoreButton() {
     const currentCount = currentPRs.length;
     const hasMore = currentCount < totalResults;
+    const remaining = totalResults - currentCount;
 
-    DOM.currentCountSpan.textContent = currentCount;
-    DOM.totalCountSpan.textContent = totalResults;
+    DOM.loadMoreText.textContent = `showing ${currentCount} of ${totalResults} (${remaining} more)`;
 
     if (hasMore) {
         DOM.loadMoreBtn.classList.remove('hidden');
