@@ -171,13 +171,18 @@ while read -r url; do
     }
   ' "$html_file" >> "$jobs_file" 2>/dev/null || true
 
-  # Process running jobs (may not have URLs)
+  # Process running jobs (empty class - may be running or stale HTML)
   awk '
     /<span class="">/ {
       match($0, /<span class="">([^<]+)<\/span>/, arr)
       job = arr[1]
+      getline; getline  # Skip next 2 lines to get to <a href>
+      url = ""
+      if (match($0, /href="([^"]+)"/, url_arr)) {
+        url = url_arr[1]
+      }
       if (job ~ /^periodic-ci-/) {
-        print job "|'"$timestamp"'|running|"
+        print job "|'"$timestamp"'|running|" url
       }
     }
   ' "$html_file" >> "$jobs_file" 2>/dev/null || true
@@ -187,6 +192,44 @@ done <<< "$PAYLOAD_URLS"
 
 # Concatenate all per-iteration job files
 cat "$TMPDIR"/jobs_*.txt > "$TMPDIR/payload_jobs.txt" 2>/dev/null || true
+
+# Verify jobs marked as "running" - check if they actually completed
+# The pr-payload-tests dashboard sometimes fails to update the CSS class
+# after a job finishes, leaving it with an empty class (<span class="">)
+# which we parse as "running". We verify by checking finished.json in GCS.
+if [ -f "$TMPDIR/payload_jobs.txt" ] && [ -s "$TMPDIR/payload_jobs.txt" ]; then
+  cp "$TMPDIR/payload_jobs.txt" "$TMPDIR/payload_jobs_unverified.txt"
+  : > "$TMPDIR/payload_jobs.txt"
+
+  while IFS='|' read -r job ts status url; do
+    if [ "$status" = "running" ] && [ -n "$url" ]; then
+      # Convert Prow URL to finished.json artifact URL
+      if [[ "$url" =~ https://prow.ci.openshift.org/view/gs/(.+) ]]; then
+        gcs_path="${BASH_REMATCH[1]}"
+        finished_url="https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/${gcs_path}/finished.json"
+
+        if finished_json=$(curl -sL --max-time 5 "$finished_url" 2>/dev/null) && \
+           echo "$finished_json" | jq -e '.timestamp' >/dev/null 2>&1; then
+          # Job completed - determine real status from finished.json
+          if echo "$finished_json" | jq -e '.passed == true' >/dev/null 2>&1; then
+            echo "${job}|${ts}|success|${url}" >> "$TMPDIR/payload_jobs.txt"
+          else
+            echo "${job}|${ts}|failed|${url}" >> "$TMPDIR/payload_jobs.txt"
+          fi
+        else
+          # No valid finished.json - job is genuinely still running
+          echo "${job}|${ts}|running|${url}" >> "$TMPDIR/payload_jobs.txt"
+        fi
+      else
+        # URL doesn't match Prow pattern, can't verify - keep as running
+        echo "${job}|${ts}|running|${url}" >> "$TMPDIR/payload_jobs.txt"
+      fi
+    else
+      # Not a running job or no URL - keep as-is
+      echo "${job}|${ts}|${status}|${url}" >> "$TMPDIR/payload_jobs.txt"
+    fi
+  done < "$TMPDIR/payload_jobs_unverified.txt"
+fi
 
 # Check if we found any jobs
 if [ ! -f "$TMPDIR/payload_jobs.txt" ] || [ ! -s "$TMPDIR/payload_jobs.txt" ]; then
