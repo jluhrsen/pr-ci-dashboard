@@ -67,8 +67,7 @@ python server.py author:jluhrsen label:bug is:draft
 
 - **Backend**: Flask server running bash scripts via subprocess
 - **Frontend**: Vanilla JS with Red Hat theme
-- **Scripts**: Fetched from https://github.com/openshift-eng/ai-helpers/pull/177
-  - **Note:** Currently uses PR #177 (development). Will switch to `main` branch after merge. Configurable via `AI_HELPERS_BRANCH` environment variable.
+- **Scripts**: Local bash scripts in `scripts/` directory for PR search and job retesting
 - **Auth**: Uses local `gh` CLI credentials (no OAuth setup needed)
 
 ## Project Structure
@@ -78,7 +77,8 @@ pr-ci-dashboard/
 ├── server.py           # Flask entry point
 ├── api/                # API endpoints (search, jobs, retest)
 ├── parsers/            # Parse script output
-├── utils/              # Script fetcher, executor, auth check
+├── scripts/            # Bash scripts for PR search and job retesting
+├── utils/              # Script executor, auth check
 ├── static/             # app.js, styles.css
 └── templates/          # index.html
 ```
@@ -93,15 +93,6 @@ gh auth status
 
 **Scripts timeout**
 Increase timeout in `utils/job_executor.py` (default 30s)
-
-**Failed to fetch scripts**
-Check internet connection and verify https://github.com/openshift-eng/ai-helpers/pull/177 is accessible
-
-## Configuration
-
-**Environment Variables:**
-- `AI_HELPERS_BRANCH`: GitHub ref to fetch scripts from (default: `refs/pull/177/head`)
-  - After PR merge, set to `main` or update default in code
 
 ## Documentation
 
