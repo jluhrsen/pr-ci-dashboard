@@ -1,0 +1,167 @@
+<h2>Dumpster Fire Variations</h2>
+<p class="subtitle">The classic dev culture icon - which style works best?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Emoji Combo</h3>
+      <p>Simple: 🗑️🔥 (trash can + fire)</p>
+      <div style="font-size: 2.5em; margin: 10px 0;">🗑️🔥</div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Custom SVG - Realistic</h3>
+      <p>Detailed dumpster with flames, more professional</p>
+      <div style="margin: 10px 0;">
+        <svg width="48" height="48" viewBox="0 0 48 48">
+          <!-- Dumpster body -->
+          <rect x="8" y="26" width="32" height="16" fill="#4a5568" stroke="#2d3748" stroke-width="1"/>
+          <polygon points="8,26 6,24 42,24 40,26" fill="#718096"/>
+          <!-- Wheels -->
+          <circle cx="14" cy="42" r="2" fill="#2d3748"/>
+          <circle cx="34" cy="42" r="2" fill="#2d3748"/>
+          <!-- Flames -->
+          <path d="M 24 22 Q 22 18 24 14 Q 26 18 24 22 Z" fill="#ff6b35"/>
+          <path d="M 18 24 Q 16 21 18 18 Q 20 21 18 24 Z" fill="#f7931e"/>
+          <path d="M 30 24 Q 28 21 30 18 Q 32 21 30 24 Z" fill="#f7931e"/>
+          <path d="M 24 16 Q 22 13 24 10 Q 26 13 24 16 Z" fill="#ffc300"/>
+          <path d="M 20 20 Q 18 17 20 14 Q 22 17 20 20 Z" fill="#ff6b35"/>
+          <path d="M 28 20 Q 26 17 28 14 Q 30 17 28 20 Z" fill="#ff6b35"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Custom SVG - Cartoon Style</h3>
+      <p>Playful, bold lines, fun aesthetic</p>
+      <div style="margin: 10px 0;">
+        <svg width="48" height="48" viewBox="0 0 48 48">
+          <!-- Dumpster body - bold -->
+          <rect x="10" y="26" width="28" height="14" fill="#5a6c7d" stroke="#2d3748" stroke-width="2" rx="2"/>
+          <rect x="8" y="24" width="32" height="3" fill="#6b7c8d" stroke="#2d3748" stroke-width="2"/>
+          <!-- Wheels - chunky -->
+          <circle cx="16" cy="41" r="3" fill="#2d3748" stroke="#000" stroke-width="1.5"/>
+          <circle cx="32" cy="41" r="3" fill="#2d3748" stroke="#000" stroke-width="1.5"/>
+          <!-- Big bold flames -->
+          <ellipse cx="24" cy="18" rx="8" ry="12" fill="#ff4500" opacity="0.8"/>
+          <ellipse cx="18" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+          <ellipse cx="30" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+          <ellipse cx="24" cy="14" rx="5" ry="8" fill="#ffa500" opacity="0.9"/>
+          <!-- Flame highlights -->
+          <ellipse cx="24" cy="16" rx="3" ry="5" fill="#ffed4e" opacity="0.7"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="d" onclick="toggleSelect(this)">
+    <div class="letter">D</div>
+    <div class="content">
+      <h3>Custom SVG - Minimalist</h3>
+      <p>Clean lines, simple shapes, scales well at small size</p>
+      <div style="margin: 10px 0;">
+        <svg width="48" height="48" viewBox="0 0 48 48">
+          <!-- Simple dumpster -->
+          <rect x="12" y="28" width="24" height="12" fill="#667" stroke="#334" stroke-width="1.5" rx="1"/>
+          <line x1="10" y1="28" x2="38" y2="28" stroke="#889" stroke-width="2"/>
+          <circle cx="18" cy="41" r="2" fill="#334"/>
+          <circle cx="30" cy="41" r="2" fill="#334"/>
+          <!-- Stylized flames - triangular -->
+          <polygon points="24,12 20,24 28,24" fill="#ff5722" opacity="0.9"/>
+          <polygon points="18,18 15,26 21,26" fill="#ff7043" opacity="0.8"/>
+          <polygon points="30,18 27,26 33,26" fill="#ff7043" opacity="0.8"/>
+          <polygon points="24,8 22,16 26,16" fill="#ffb74d" opacity="0.9"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 2em;">
+  <h3>In Context</h3>
+  <div class="mockup">
+    <div class="mockup-header">How it looks on the dashboard</div>
+    <div class="mockup-body" style="padding: 15px;">
+      <!-- Example with cartoon style -->
+      <div style="display: flex; align-items: center; gap: 10px; border: 1px solid #ddd; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+        <div style="flex-shrink: 0;">
+          <svg width="32" height="32" viewBox="0 0 48 48">
+            <rect x="10" y="26" width="28" height="14" fill="#5a6c7d" stroke="#2d3748" stroke-width="2" rx="2"/>
+            <rect x="8" y="24" width="32" height="3" fill="#6b7c8d" stroke="#2d3748" stroke-width="2"/>
+            <circle cx="16" cy="41" r="3" fill="#2d3748" stroke="#000" stroke-width="1.5"/>
+            <circle cx="32" cy="41" r="3" fill="#2d3748" stroke="#000" stroke-width="1.5"/>
+            <ellipse cx="24" cy="18" rx="8" ry="12" fill="#ff4500" opacity="0.8"/>
+            <ellipse cx="18" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+            <ellipse cx="30" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+            <ellipse cx="24" cy="14" rx="5" ry="8" fill="#ffa500" opacity="0.9"/>
+            <ellipse cx="24" cy="16" rx="3" ry="5" fill="#ffed4e" opacity="0.7"/>
+          </svg>
+        </div>
+        <div style="flex: 1;">
+          <strong>e2e-aws-ovn</strong>
+          <div style="font-size: 0.9em; color: #666;">Consecutive failures: 5</div>
+          <div style="font-size: 0.85em; color: #856404; background: #fff3cd; padding: 4px 8px; margin-top: 4px; border-radius: 3px;">
+            Permafail: TestNetworkPolicy/Baseline failed in all runs
+          </div>
+        </div>
+        <button disabled style="opacity: 0.5; cursor: not-allowed; padding: 8px 16px; background: #ccc; border: none; border-radius: 4px;">
+          Retest
+        </button>
+      </div>
+
+      <!-- Example at smaller size -->
+      <div style="font-size: 0.9em; color: #666; margin-top: 15px;">
+        <strong>Icon scales at different sizes:</strong>
+        <div style="display: flex; gap: 15px; align-items: center; margin-top: 8px;">
+          <div>
+            <div style="font-size: 0.8em; margin-bottom: 4px;">16px</div>
+            <svg width="16" height="16" viewBox="0 0 48 48">
+              <rect x="10" y="26" width="28" height="14" fill="#5a6c7d" stroke="#2d3748" stroke-width="2" rx="2"/>
+              <rect x="8" y="24" width="32" height="3" fill="#6b7c8d" stroke="#2d3748" stroke-width="2"/>
+              <circle cx="16" cy="41" r="3" fill="#2d3748"/>
+              <circle cx="32" cy="41" r="3" fill="#2d3748"/>
+              <ellipse cx="24" cy="18" rx="8" ry="12" fill="#ff4500" opacity="0.8"/>
+              <ellipse cx="18" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+              <ellipse cx="30" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+              <ellipse cx="24" cy="14" rx="5" ry="8" fill="#ffa500" opacity="0.9"/>
+            </svg>
+          </div>
+          <div>
+            <div style="font-size: 0.8em; margin-bottom: 4px;">24px</div>
+            <svg width="24" height="24" viewBox="0 0 48 48">
+              <rect x="10" y="26" width="28" height="14" fill="#5a6c7d" stroke="#2d3748" stroke-width="2" rx="2"/>
+              <rect x="8" y="24" width="32" height="3" fill="#6b7c8d" stroke="#2d3748" stroke-width="2"/>
+              <circle cx="16" cy="41" r="3" fill="#2d3748"/>
+              <circle cx="32" cy="41" r="3" fill="#2d3748"/>
+              <ellipse cx="24" cy="18" rx="8" ry="12" fill="#ff4500" opacity="0.8"/>
+              <ellipse cx="18" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+              <ellipse cx="30" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+              <ellipse cx="24" cy="14" rx="5" ry="8" fill="#ffa500" opacity="0.9"/>
+            </svg>
+          </div>
+          <div>
+            <div style="font-size: 0.8em; margin-bottom: 4px;">32px</div>
+            <svg width="32" height="32" viewBox="0 0 48 48">
+              <rect x="10" y="26" width="28" height="14" fill="#5a6c7d" stroke="#2d3748" stroke-width="2" rx="2"/>
+              <rect x="8" y="24" width="32" height="3" fill="#6b7c8d" stroke="#2d3748" stroke-width="2"/>
+              <circle cx="16" cy="41" r="3" fill="#2d3748" stroke="#000" stroke-width="1.5"/>
+              <circle cx="32" cy="41" r="3" fill="#2d3748" stroke="#000" stroke-width="1.5"/>
+              <ellipse cx="24" cy="18" rx="8" ry="12" fill="#ff4500" opacity="0.8"/>
+              <ellipse cx="18" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+              <ellipse cx="30" cy="22" rx="6" ry="9" fill="#ff6b35" opacity="0.9"/>
+              <ellipse cx="24" cy="14" rx="5" ry="8" fill="#ffa500" opacity="0.9"/>
+              <ellipse cx="24" cy="16" rx="3" ry="5" fill="#ffed4e" opacity="0.7"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

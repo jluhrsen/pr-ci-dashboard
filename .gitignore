@@ -32,3 +32,6 @@ Thumbs.db
 
 # Temporary files
 /tmp/
+
+# Superpowers session state (keep mockup content, ignore runtime state)
+.superpowers/brainstorm/*/state/
