@@ -1,7 +1,7 @@
 # Permafail Detection & Auto-Retest Design
 
-**Status:** Work in Progress (Brainstorming Phase)
-**Date:** 2026-05-08
+**Status:** Ready for Implementation
+**Date:** 2026-05-08 (Updated: 2026-05-12)
 **Goal:** Add intelligent permafail detection and automated retesting to Flake Buster dashboard
 
 ## Overview
@@ -15,14 +15,54 @@ Enhance the PR CI Dashboard to:
 
 ### Permafail Detection Logic
 
-A job is considered a **permafail** when consecutive failures show:
-- **Same test case** fails in every run (by job type)
-- **Same infrastructure issue** in every run (e.g., "network operator never ready", cloud provider issues, cluster install failures with identical root cause)
+**Trigger:** Analysis runs when a job reaches 3 consecutive failures.
+
+**Detection criteria:**
+
+A job is considered a **permafail** when at least one of these conditions is true:
+- **Test failures:** At least 1 test case fails in all 3 runs
+- **Infrastructure failures:** Same infrastructure error in all 3 runs (e.g., "network operator never ready", cluster install failures with identical root cause)
+
+**Future enhancement:** Extend pattern matching to 4/5, 7/10 for longer failure histories.
+
+**Failure signature format:**
+
+Test failures:
+```json
+{
+  "type": "test_failure",
+  "tests": ["TestNetworkPolicy/Baseline", "TestPodConnectivity"]
+}
+```
+
+Infrastructure failures:
+```json
+{
+  "type": "infra_failure",
+  "error": "network operator timeout"
+}
+```
+
+**Comparison logic:**
+- All 3 signatures are `type: "test_failure"` → Check for ≥1 common test name
+- All 3 signatures are `type: "infra_failure"` → Compare error messages for similarity
+- Mixed types → Not a permafail (inconsistent failure pattern)
 
 ### AI Integration Approach
 
-- Dashboard runs as local Flask server
-- Shells out to local Claude Code CLI for analysis
+**New skill:** `/pr-ci-dashboard:detect-permafail`
+
+This skill wraps the existing `ci-prow-navigation` skill to analyze job failures in parallel.
+
+**How it works:**
+1. Skill receives 3 job URLs (consecutive failures)
+2. Spawns 3 parallel subagents using Task tool
+3. Each subagent invokes `ci-prow-navigation` skill on one URL
+4. Each subagent extracts failure signature (structured format)
+5. Main skill compares signatures → permafail verdict
+
+**Dashboard integration:**
+- Flask backend shells out to Claude Code CLI: `claude-code skill pr-ci-dashboard:detect-permafail`
 - Target user: Red Hat developers already using Claude Code locally
 - Future: When moved to central server, same architecture works (users connect to server, server uses local Claude)
 
@@ -38,13 +78,14 @@ A job is considered a **permafail** when consecutive failures show:
 **Schema:**
 ```sql
 job_analyses:
-  - job_url (primary key)          -- Unique identifier from Prow
-  - pr_number
-  - repo
-  - job_name
-  - analysis_result                 -- JSON: {permafail: bool, reason: str, test_names: [], ...}
-  - analyzed_at                     -- Timestamp
-  - override                        -- User manually cleared permafail flag
+  - job_url (TEXT PRIMARY KEY)      -- Unique identifier from Prow
+  - pr_number (INTEGER)
+  - repo (TEXT)
+  - job_name (TEXT)
+  - signature (TEXT)                -- JSON failure signature: {"type": "test_failure", "tests": [...]}
+  - analyzed_at (TIMESTAMP)
+  - permafail_result (TEXT)         -- JSON: full skill output {permafail: bool, reason: str, ...}
+  - override (BOOLEAN DEFAULT FALSE) -- User manually cleared permafail flag
 ```
 
 ### Visual Design
@@ -131,9 +172,25 @@ job_analyses:
   - Output: `{job_url: {permafail: bool, reason: str, override: bool}}`
 
 **New modules:**
-- `utils/db.py` - SQLite connection, schema, queries
-- `utils/ai_analyzer.py` - Shell out to Claude Code CLI, parse results
-- `api/analysis.py` - Analysis endpoint handlers
+
+`utils/db.py` - SQLite database layer:
+- `init_db()` - Create tables if not exist
+- `get_signature(job_url)` - Retrieve cached signature for a job URL
+- `store_analysis(job_url, pr_number, repo, job_name, signature, permafail_result)` - Cache analysis results
+- `get_permafail_status(job_urls)` - Batch query for permafail status of multiple job URLs
+- `clear_override(job_url)` - Reset override flag to false
+
+`utils/ai_analyzer.py` - Claude Code CLI integration:
+- `analyze_permafail(job_urls, job_name, pr_info)` - Main entry point
+  - Builds CLI command with escaped JSON parameters
+  - Executes: `claude-code skill pr-ci-dashboard:detect-permafail --job-urls='...' --job-name='...' --pr='...'`
+  - Parses JSON output from stdout
+  - Returns dict: `{permafail: bool, reason: str, signatures: [...], ...}`
+
+`api/analysis.py` - HTTP endpoint handlers:
+- Analysis endpoints implementation
+- Request validation
+- Error handling and logging
 
 ### Frontend (JavaScript)
 
@@ -152,28 +209,50 @@ Job Card States:
 4. Permafail overridden: Normal failure state restored, override tracked
 ```
 
-### AI Analysis Integration
+### Skill Design: `/pr-ci-dashboard:detect-permafail`
 
-**Claude Code CLI invocation:**
-```bash
-claude-code --non-interactive "Analyze these Prow job failures: [URLs].
-Determine if this is a permafail (same failure pattern across all runs).
-Output JSON: {permafail: bool, reason: str, failing_tests: []}"
+**Purpose:** Analyze 3 consecutive failed job runs to determine if they represent a permafail pattern.
+
+**Inputs:**
+```json
+{
+  "job_urls": [
+    "https://prow.ci.openshift.org/view/...",
+    "https://prow.ci.openshift.org/view/...",
+    "https://prow.ci.openshift.org/view/..."
+  ],
+  "job_name": "e2e-aws-ovn",
+  "pr": "openshift/ovn-kubernetes#1234"
+}
 ```
 
-**Analysis flow:**
-1. Check SQLite for cached result by job URL
-2. If not cached:
-   - Invoke Claude Code CLI with job URLs
-   - Parse JSON response
-   - Store in SQLite
-3. Return result to frontend
+**Processing:**
+1. Spawn 3 parallel subagents (using Task tool)
+2. Each subagent:
+   - Invokes `ci-prow-navigation` skill on one job URL
+   - Extracts failure signature in structured format:
+     - For test failures: Parse test case names from e2e step output
+     - For infra failures: Extract error message from failed step (e.g., cluster setup, network operator)
+   - Returns signature to main skill
+3. Main skill compares the 3 signatures:
+   - If all `type: "test_failure"` → check for ≥1 common test name (exact string match)
+   - If all `type: "infra_failure"` → compare error messages for similarity (exact match or semantic similarity via LLM)
+   - If mixed types → not a permafail
+4. Generate verdict with reasoning
 
-**AI analysis criteria:**
-- Compare test failure patterns across runs
-- Identify infrastructure vs. test failures
-- Detect identical error messages/stack traces
-- Flag if same test case fails in 100% of runs
+**Outputs:**
+```json
+{
+  "permafail": true,
+  "reason": "Same test 'TestNetworkPolicy/Baseline' failed in all 3 runs",
+  "signatures": [
+    {"type": "test_failure", "tests": ["TestNetworkPolicy/Baseline", "TestPodConnectivity"]},
+    {"type": "test_failure", "tests": ["TestNetworkPolicy/Baseline"]},
+    {"type": "test_failure", "tests": ["TestNetworkPolicy/Baseline", "TestDNS"]}
+  ],
+  "common_tests": ["TestNetworkPolicy/Baseline"]
+}
+```
 
 ## User Workflows
 
@@ -206,47 +285,183 @@ Output JSON: {permafail: bool, reason: str, failing_tests: []}"
 4. Dumpster fire removed, retest re-enabled
 5. User can manually retest
 
-## Open Questions / Next Steps
+## Error Handling & Edge Cases
 
-### Still to decide:
+### Error Scenarios
 
-1. **AI analysis details:**
-   - Which /ci skills to wrap? (Need to explore available skills)
-   - How to structure the analysis prompt?
-   - How deep to analyze (recent 2-3 runs vs all consecutive failures)?
+**1. AI Analysis Fails/Times Out**
+```python
+if skill_invocation_fails:
+    - Log error
+    - Return {"permafail": false, "error": "Analysis failed"}
+    - UI shows: "Analysis unavailable, manual check needed"
+    - Don't block auto-retest (fail open, not closed)
+```
 
-2. **Auto-retest timing:**
-   - Immediate retry or wait interval after 1st/2nd failure?
-   - Backoff strategy if multiple retests needed?
+**2. Partial Cache Hits**
+```python
+# Example: 2 of 3 URLs cached
+if some_cached and some_not:
+    - Only analyze uncached URLs
+    - Reconstruct full comparison from mixed sources
+    - Store new signatures in DB
+```
 
-3. **Error handling:**
-   - What if AI analysis fails/times out?
-   - Fallback behavior?
-   - Show error state or fail silently?
+**3. Mixed Signature Types**
+```python
+# Run 1: test_failure, Run 2: infra_failure, Run 3: test_failure
+if signatures have different types:
+    - Return {"permafail": false, "reason": "Inconsistent failure patterns"}
+    - Treat as flaky/varied behavior
+```
 
-4. **Scope boundaries:**
-   - Permafail detection only for e2e jobs, or payload jobs too?
-   - Different thresholds for different job types?
+**4. Empty Test Lists**
+```python
+# No tests extracted (parsing issue?)
+if signature.tests is empty:
+    - Return {"permafail": false, "error": "Could not extract test data"}
+    - Log for debugging
+    - Don't block retesting
+```
 
-5. **Future enhancements:**
-   - Notification when permafail detected?
-   - Team-wide permafail tracking (when moved to server)?
-   - Integration with JIRA for bug filing?
+**5. Context Menu on Non-Permafail Jobs**
+```javascript
+// User right-clicks job without permafail
+if (!job.permafail) {
+    // Show different menu or no menu
+    // Avoid confusion
+}
+```
 
-### Implementation approach:
+**Philosophy:** Fail gracefully. If analysis can't run or gives ambiguous results, default to allowing retest (conservative approach).
 
-Once design is finalized:
-1. Create implementation plan (writing-plans skill)
-2. Phase 1: SQLite schema + basic CRUD
-3. Phase 2: AI analyzer integration
-4. Phase 3: Frontend UI (dumpster fire, context menu)
-5. Phase 4: Auto-retest logic enhancement
-6. Phase 5: Testing & refinement
+## Data Flow
+
+### End-to-End Flow for Permafail Detection
+
+```
+1. User loads dashboard
+   ↓
+2. Frontend fetches PR jobs from existing /api/jobs endpoint
+   ↓
+3. For each job with 3+ consecutive failures:
+   Frontend calls POST /api/jobs/status with job URLs
+   ↓
+4. Backend checks SQLite cache:
+   - All 3 URLs cached → return cached result
+   - Some/none cached → continue to step 5
+   ↓
+5. Backend invokes ai_analyzer.analyze_permafail()
+   ↓
+6. ai_analyzer shells out to Claude Code CLI:
+   $ claude-code skill pr-ci-dashboard:detect-permafail --job-urls="[...]" --job-name="..." --pr="..."
+   ↓
+7. Skill spawns 3 parallel Task subagents
+   Each runs: ci-prow-navigation on one URL
+   ↓
+8. Subagents return signatures to skill
+   ↓
+9. Skill compares signatures → verdict
+   ↓
+10. Skill returns JSON to CLI
+    ↓
+11. Backend parses JSON, stores in SQLite:
+    - Each job URL → signature
+    - Overall result → permafail_result
+    ↓
+12. Backend returns to frontend:
+    {job_url: {permafail: bool, reason: str, override: bool}}
+    ↓
+13. Frontend updates UI:
+    - Show dumpster fire if permafail
+    - Disable retest button
+    - Display reason in warning banner
+```
+
+### Auto-Retest Flow
+
+```
+1. Job fails (detected via polling)
+   ↓
+2. consecutiveFailures++
+   ↓
+3. If consecutiveFailures <= 2:
+   → Auto-retest immediately
+
+4. If consecutiveFailures === 3:
+   → Trigger analysis (steps 3-13 above)
+   → If NOT permafail: auto-retest
+   → If permafail: stop, show dumpster fire
+```
+
+## Implementation Phases
+
+### Phase 1: Database Foundation
+- Create `utils/db.py` with SQLite schema
+- Add init script to create tables on first run
+- Write basic CRUD functions
+- Test with mock data
+
+### Phase 2: Skill Development
+- Create `/pr-ci-dashboard:detect-permafail` skill
+- Define signature extraction logic from `ci-prow-navigation` output
+- Implement parallel subagent spawning
+- Test signature comparison logic
+- Handle edge cases (mixed types, empty results)
+
+### Phase 3: Backend API
+- Implement `utils/ai_analyzer.py` (Claude Code CLI wrapper)
+- Create `api/analysis.py` endpoints
+- Wire up SQLite caching
+- Test full analysis flow end-to-end
+
+### Phase 4: Frontend UI
+- Add dumpster fire SVG icon component
+- Implement "Check for Permafail" button
+- Build context menu (right-click)
+- Add permafail state to job cards
+- Wire up API calls
+
+### Phase 5: Auto-Retest Integration
+- Enhance existing auto-retest polling logic
+- Add 3-failure threshold check
+- Integrate permafail detection into retry flow
+- Test complete workflow
+
+### Phase 6: Polish & Testing
+- Error handling refinement
+- Performance optimization (parallel requests)
+- User testing with real PRs
+- Documentation updates
+
+**Estimated scope:** ~2-3 weeks implementation (part-time)
+
+## Scope & Applicability
+
+**Included in v1:**
+- E2E jobs and payload jobs (same analysis approach for both)
+- 3-failure threshold for all job types
+- Manual "Check for permafail" button (user-controlled)
+- Auto-retest with permafail protection
+
+**Not included in v1 (future enhancements):**
+- Notification system when permafail detected
+- Team-wide permafail tracking (when moved to server)
+- JIRA integration for bug filing
+- Extended pattern matching (4/5, 7/10 thresholds)
+- Different thresholds per job type
+- Auto-retest timing/backoff configuration
+
+**Auto-retest behavior:**
+- 1st and 2nd failures: Immediate retry (no delay)
+- Future: Could add backoff strategy if needed
 
 ## Notes
 
 - Visual companion used for icon design exploration
-- Cartoon dumpster fire chosen for fun, clear communication
+- Cartoon dumpster fire (Option C) chosen for fun, clear communication
 - Context menu chosen for extensibility
 - SQLite chosen for scale (10s of users, 100s-1000s of jobs)
 - Manual "Check for permafail" keeps AI compute controlled
+- Conservative error handling: fail open (allow retest) rather than closed
+- Skill wraps existing `ci-prow-navigation` skill (no new Prow integration needed)
