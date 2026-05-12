@@ -1,7 +1,8 @@
 import pytest
 import sqlite3
 import os
-from utils.db import init_db
+import json
+from utils.db import init_db, store_analysis
 
 def test_init_db_creates_tables(tmp_path):
     """Test that init_db creates job_analyses table with correct schema"""
@@ -139,3 +140,43 @@ def test_init_db_invalid_path():
 
     with pytest.raises(RuntimeError, match="Failed to initialize database"):
         init_db(invalid_path)
+
+
+def test_store_analysis_inserts_new_record(tmp_path):
+    """Test that store_analysis inserts a new analysis result"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    job_url = "https://prow.ci.openshift.org/view/gs/123"
+    signature = {"type": "test_failure", "tests": ["TestFoo"]}
+    permafail_result = {"permafail": True, "reason": "TestFoo failed"}
+
+    store_analysis(
+        job_url=job_url,
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature=signature,
+        permafail_result=permafail_result,
+        db_path=str(db_path)
+    )
+
+    conn = None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM job_analyses WHERE job_url = ?", (job_url,))
+        row = cursor.fetchone()
+
+        assert row is not None
+        assert row[0] == job_url  # job_url
+        assert row[1] == 1234  # pr_number
+        assert row[2] == "openshift/ovn-kubernetes"  # repo
+        assert row[3] == "e2e-aws-ovn"  # job_name
+        assert json.loads(row[4]) == signature  # signature
+        assert row[5] is not None  # analyzed_at
+        assert json.loads(row[6]) == permafail_result  # permafail_result
+        assert row[7] == 0  # override (default)
+    finally:
+        if conn:
+            conn.close()
