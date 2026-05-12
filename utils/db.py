@@ -138,3 +138,33 @@ def get_permafail_status(job_urls, db_path=None):
     finally:
         if conn:
             conn.close()
+
+
+def clear_override(job_url, db_path=None):
+    """
+    Clear override flag for a job URL
+
+    Args:
+        job_url: Prow job URL
+        db_path: Optional database path (defaults to DB_PATH)
+
+    Raises:
+        RuntimeError: If database operation fails
+    """
+    path = db_path or DB_PATH
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "UPDATE job_analyses SET override = 0 WHERE job_url = ?",
+            (job_url,)
+        )
+
+        conn.commit()
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to clear override for {job_url}: {e}")
+    finally:
+        if conn:
+            conn.close()

@@ -2,7 +2,7 @@ import pytest
 import sqlite3
 import os
 import json
-from utils.db import init_db, store_analysis, get_permafail_status
+from utils.db import init_db, store_analysis, get_permafail_status, clear_override
 
 def test_init_db_creates_tables(tmp_path):
     """Test that init_db creates job_analyses table with correct schema"""
@@ -410,3 +410,49 @@ def test_get_permafail_status_malformed_json(tmp_path):
         get_permafail_status(["https://prow.ci.openshift.org/view/gs/999"], str(db_path))
 
     assert "Invalid JSON in database" in str(exc_info.value)
+
+
+def test_clear_override_resets_flag(tmp_path):
+    """Test that clear_override sets override to 0"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    job_url = "https://prow.ci.openshift.org/view/gs/123"
+
+    # Store analysis
+    store_analysis(
+        job_url=job_url,
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={"type": "test_failure", "tests": ["TestFoo"]},
+        permafail_result={"permafail": True, "reason": "TestFoo failed"},
+        db_path=str(db_path)
+    )
+
+    # Set override to 1 (simulating user previously cleared permafail)
+    conn = None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("UPDATE job_analyses SET override = 1 WHERE job_url = ?", (job_url,))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+    # Clear override
+    clear_override(job_url, str(db_path))
+
+    # Verify override is now 0
+    conn = None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT override FROM job_analyses WHERE job_url = ?", (job_url,))
+        row = cursor.fetchone()
+        assert row is not None
+        assert row[0] == 0
+    finally:
+        if conn:
+            conn.close()
