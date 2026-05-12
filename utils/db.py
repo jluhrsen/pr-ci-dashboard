@@ -83,3 +83,55 @@ def store_analysis(job_url, pr_number, repo, job_name, signature, permafail_resu
     finally:
         if conn:
             conn.close()
+
+
+def get_permafail_status(job_urls, db_path=None):
+    """
+    Get permafail status for multiple job URLs
+
+    Args:
+        job_urls: List of Prow job URLs to check
+        db_path: Optional database path (defaults to DB_PATH)
+
+    Returns:
+        dict: Map of job_url -> {permafail: bool, reason: str, override: bool}
+              Only includes URLs that have cached analysis
+
+    Raises:
+        RuntimeError: If database operation fails
+    """
+    path = db_path or DB_PATH
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+
+        # Handle empty list case
+        if not job_urls:
+            return {}
+
+        # Use parameterized query with IN clause
+        placeholders = ','.join('?' * len(job_urls))
+        query = f"SELECT job_url, permafail_result, override FROM job_analyses WHERE job_url IN ({placeholders})"
+
+        cursor.execute(query, job_urls)
+        rows = cursor.fetchall()
+
+        result = {}
+        for row in rows:
+            job_url = row[0]
+            permafail_result = json.loads(row[1])
+            override = bool(row[2])
+
+            result[job_url] = {
+                "permafail": permafail_result.get("permafail", False),
+                "reason": permafail_result.get("reason", ""),
+                "override": override
+            }
+
+        return result
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to get permafail status: {e}")
+    finally:
+        if conn:
+            conn.close()

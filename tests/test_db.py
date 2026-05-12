@@ -2,7 +2,7 @@ import pytest
 import sqlite3
 import os
 import json
-from utils.db import init_db, store_analysis
+from utils.db import init_db, store_analysis, get_permafail_status
 
 def test_init_db_creates_tables(tmp_path):
     """Test that init_db creates job_analyses table with correct schema"""
@@ -281,3 +281,52 @@ def test_store_analysis_database_error_handling(tmp_path):
     finally:
         # Restore permissions for cleanup
         readonly_dir.chmod(0o755)
+
+
+def test_get_permafail_status_returns_dict(tmp_path):
+    """Test that get_permafail_status returns correct status for job URLs"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    # Store some analysis results
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/123",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={"type": "test_failure", "tests": ["TestFoo"]},
+        permafail_result={"permafail": True, "reason": "TestFoo failed"},
+        db_path=str(db_path)
+    )
+
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/456",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-gcp-ovn",
+        signature={"type": "test_failure", "tests": ["TestBar"]},
+        permafail_result={"permafail": False, "reason": "Flaky"},
+        db_path=str(db_path)
+    )
+
+    job_urls = [
+        "https://prow.ci.openshift.org/view/gs/123",
+        "https://prow.ci.openshift.org/view/gs/456",
+        "https://prow.ci.openshift.org/view/gs/789"  # Not in DB
+    ]
+
+    result = get_permafail_status(job_urls, str(db_path))
+
+    # Check first URL (permafail)
+    assert "https://prow.ci.openshift.org/view/gs/123" in result
+    assert result["https://prow.ci.openshift.org/view/gs/123"]["permafail"] is True
+    assert result["https://prow.ci.openshift.org/view/gs/123"]["reason"] == "TestFoo failed"
+    assert result["https://prow.ci.openshift.org/view/gs/123"]["override"] is False
+
+    # Check second URL (not permafail)
+    assert "https://prow.ci.openshift.org/view/gs/456" in result
+    assert result["https://prow.ci.openshift.org/view/gs/456"]["permafail"] is False
+    assert result["https://prow.ci.openshift.org/view/gs/456"]["override"] is False
+
+    # Check third URL (not in database)
+    assert "https://prow.ci.openshift.org/view/gs/789" not in result
