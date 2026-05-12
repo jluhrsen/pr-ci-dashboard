@@ -30,6 +30,10 @@ Thumbs.db
 # Logs
 *.log
 
+# Database
+dashboard.db
+dashboard.db-journal
+
 # Temporary files
 /tmp/
 
