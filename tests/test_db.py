@@ -330,3 +330,83 @@ def test_get_permafail_status_returns_dict(tmp_path):
 
     # Check third URL (not in database)
     assert "https://prow.ci.openshift.org/view/gs/789" not in result
+
+
+def test_get_permafail_status_empty_list(tmp_path):
+    """Test that get_permafail_status handles empty list correctly"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    result = get_permafail_status([], str(db_path))
+
+    assert result == {}
+
+
+def test_get_permafail_status_database_error(tmp_path):
+    """Test that get_permafail_status raises RuntimeError on database error"""
+    invalid_path = tmp_path / "nonexistent" / "test.db"
+
+    with pytest.raises(RuntimeError) as exc_info:
+        get_permafail_status(["https://example.com"], str(invalid_path))
+
+    assert "Failed to get permafail status" in str(exc_info.value)
+
+
+def test_get_permafail_status_with_override(tmp_path):
+    """Test that get_permafail_status correctly returns override=True"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    # Store analysis
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/123",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={"type": "test_failure", "tests": ["TestFoo"]},
+        permafail_result={"permafail": True, "reason": "TestFoo failed"},
+        db_path=str(db_path)
+    )
+
+    # Manually set override to 1
+    conn = None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("UPDATE job_analyses SET override = 1 WHERE job_url = ?",
+                      ("https://prow.ci.openshift.org/view/gs/123",))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+    # Verify override is True
+    result = get_permafail_status(["https://prow.ci.openshift.org/view/gs/123"], str(db_path))
+
+    assert result["https://prow.ci.openshift.org/view/gs/123"]["override"] is True
+
+
+def test_get_permafail_status_malformed_json(tmp_path):
+    """Test that get_permafail_status raises RuntimeError on malformed JSON"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    # Insert record with invalid JSON
+    conn = None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO job_analyses (job_url, pr_number, repo, job_name, signature, analyzed_at, permafail_result, override)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+        """, ("https://prow.ci.openshift.org/view/gs/999", 1234, "test/repo", "job", "{}", "2024-01-01", "INVALID JSON"))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+    # Verify RuntimeError is raised
+    with pytest.raises(RuntimeError) as exc_info:
+        get_permafail_status(["https://prow.ci.openshift.org/view/gs/999"], str(db_path))
+
+    assert "Invalid JSON in database" in str(exc_info.value)

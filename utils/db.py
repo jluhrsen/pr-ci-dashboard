@@ -120,7 +120,10 @@ def get_permafail_status(job_urls, db_path=None):
         result = {}
         for row in rows:
             job_url = row[0]
-            permafail_result = json.loads(row[1])
+            try:
+                permafail_result = json.loads(row[1])
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"Invalid JSON in database for job {job_url}: {e}")
             override = bool(row[2])
 
             result[job_url] = {
