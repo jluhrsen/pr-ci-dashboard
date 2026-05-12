@@ -180,3 +180,104 @@ def test_store_analysis_inserts_new_record(tmp_path):
     finally:
         if conn:
             conn.close()
+
+
+def test_store_analysis_updates_existing(tmp_path):
+    """Test that store_analysis updates existing record (INSERT OR REPLACE)"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    job_url = "https://prow.ci.openshift.org/view/gs/456"
+    signature_v1 = {"type": "test_failure", "tests": ["TestBar"]}
+    permafail_result_v1 = {"permafail": False, "reason": "No permafail"}
+
+    # First store
+    store_analysis(
+        job_url=job_url,
+        pr_number=5678,
+        repo="openshift/kubernetes",
+        job_name="e2e-aws",
+        signature=signature_v1,
+        permafail_result=permafail_result_v1,
+        db_path=str(db_path)
+    )
+
+    # Update with new data
+    signature_v2 = {"type": "test_failure", "tests": ["TestBar", "TestBaz"]}
+    permafail_result_v2 = {"permafail": True, "reason": "New failure detected"}
+
+    store_analysis(
+        job_url=job_url,
+        pr_number=9999,
+        repo="openshift/kubernetes-updated",
+        job_name="e2e-aws-updated",
+        signature=signature_v2,
+        permafail_result=permafail_result_v2,
+        db_path=str(db_path)
+    )
+
+    # Verify update occurred
+    conn = None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM job_analyses WHERE job_url = ?", (job_url,))
+        count = cursor.fetchone()[0]
+        assert count == 1  # Still only one record
+
+        cursor.execute("SELECT * FROM job_analyses WHERE job_url = ?", (job_url,))
+        row = cursor.fetchone()
+
+        assert row[1] == 9999  # Updated pr_number
+        assert row[2] == "openshift/kubernetes-updated"  # Updated repo
+        assert row[3] == "e2e-aws-updated"  # Updated job_name
+        assert json.loads(row[4]) == signature_v2  # Updated signature
+        assert json.loads(row[6]) == permafail_result_v2  # Updated permafail_result
+    finally:
+        if conn:
+            conn.close()
+
+
+def test_store_analysis_invalid_path():
+    """Test that store_analysis raises RuntimeError for invalid database paths"""
+    invalid_path = "/nonexistent/directory/that/does/not/exist/database.db"
+
+    with pytest.raises(RuntimeError, match="Failed to store analysis"):
+        store_analysis(
+            job_url="https://example.com/job",
+            pr_number=123,
+            repo="test-repo",
+            job_name="test-job",
+            signature={"type": "test"},
+            permafail_result={"permafail": False},
+            db_path=invalid_path
+        )
+
+
+def test_store_analysis_database_error_handling(tmp_path):
+    """Test that store_analysis handles database errors gracefully"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    # Use a non-writable path after creating the db to simulate error
+    # (we'll pass a path that looks valid but can't be written to)
+    # Create a read-only directory
+    readonly_dir = tmp_path / "readonly"
+    readonly_dir.mkdir()
+    readonly_db = readonly_dir / "test.db"
+    readonly_dir.chmod(0o444)  # Make directory read-only
+
+    try:
+        with pytest.raises(RuntimeError, match="Failed to store analysis"):
+            store_analysis(
+                job_url="https://example.com/job",
+                pr_number=123,
+                repo="test-repo",
+                job_name="test-job",
+                signature={"type": "test"},
+                permafail_result={"permafail": False},
+                db_path=str(readonly_db)
+            )
+    finally:
+        # Restore permissions for cleanup
+        readonly_dir.chmod(0o755)

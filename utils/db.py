@@ -1,7 +1,7 @@
 import sqlite3
 import os
 import json
-from datetime import datetime
+from datetime import datetime, UTC
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'dashboard.db')
 
@@ -73,7 +73,7 @@ def store_analysis(job_url, pr_number, repo, job_name, signature, permafail_resu
             repo,
             job_name,
             json.dumps(signature),
-            datetime.utcnow().isoformat(),
+            datetime.now(UTC).isoformat(),
             json.dumps(permafail_result)
         ))
 
