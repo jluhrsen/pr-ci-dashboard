@@ -7,7 +7,7 @@ def analyze_permafail(job_urls, job_name, pr_info):
     Analyze job URLs for permafail pattern using Claude Code CLI
 
     Args:
-        job_urls: List of 3 consecutive Prow job URLs
+        job_urls: List of 2-10 consecutive Prow job URLs
         job_name: Name of the job (e.g., "e2e-aws-ovn")
         pr_info: PR identifier (e.g., "openshift/ovn-kubernetes#1234")
 
@@ -20,17 +20,43 @@ def analyze_permafail(job_urls, job_name, pr_info):
     # Get the project root directory (where .claude-plugin/ exists)
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    # Build prompt to invoke the skill using natural language (--print mode doesn't support slash commands)
-    urls_json = json.dumps(job_urls)
-    prompt = f"""Use the pr-ci-dashboard:detect-permafail skill to analyze these job failures:
-- job-urls: {urls_json}
-- job-name: {job_name}
-- pr: {pr_info}
+    # Read both skill definitions
+    detect_permafail_path = os.path.join(project_root, 'commands', 'detect-permafail.md')
+    ci_prow_nav_path = os.path.join(project_root, '.claude', 'skills', 'ci-prow-navigation', 'SKILL.md')
 
-Execute the skill and return ONLY the final JSON result with no additional explanation."""
+    try:
+        with open(detect_permafail_path, 'r') as f:
+            detect_permafail_content = f.read()
+        with open(ci_prow_nav_path, 'r') as f:
+            ci_prow_nav_content = f.read()
+    except FileNotFoundError as e:
+        return {
+            "permafail": False,
+            "error": f"Skill file not found: {e}",
+            "signatures": []
+        }
+
+    # Build prompt with skill definitions and instructions
+    urls_json = json.dumps(job_urls)
+    prompt = f"""{detect_permafail_content}
+
+---SKILL---
+
+{ci_prow_nav_content}
+
+---TASK---
+
+Using the detect-permafail logic and ci-prow-navigation skill defined above, analyze these jobs for permafail. Do NOT use the Skill tool — execute the ci-prow-navigation steps directly using WebFetch and Bash.
+
+Jobs: {urls_json}
+Job name: {job_name}
+PR: {pr_info}
+
+Return ONLY the final JSON result with no additional explanation."""
 
     cmd = [
         'claude',
+        '--allowedTools', 'WebFetch,Bash',
         '--print'
     ]
 
@@ -40,7 +66,8 @@ Execute the skill and return ONLY the final JSON result with no additional expla
             input=prompt,  # Pass prompt via stdin
             capture_output=True,
             text=True,
-            timeout=300  # 5 minute timeout
+            timeout=300,  # 5 minute timeout
+            cwd=project_root  # Run in project directory to access .claude/skills
         )
 
         if result.returncode != 0:

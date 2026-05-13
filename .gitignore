@@ -39,3 +39,4 @@ dashboard.db-journal
 
 # Superpowers session state (keep mockup content, ignore runtime state)
 .superpowers/brainstorm/*/state/
+/.claude/
