@@ -152,20 +152,52 @@ function renderPermafailIcon(jobElement, reason) {
     icon.src = '/static/dumpster-fire.svg';
     icon.className = 'permafail-icon';
     icon.alt = 'Permafail detected';
-    icon.title = reason;
+    icon.title = 'Click to view permafail details';
+    icon.onclick = () => showPermafailModal(reason);
     jobHeader.appendChild(icon);
-
-    // Add warning banner
-    const warning = document.createElement('div');
-    warning.className = 'permafail-warning';
-    warning.textContent = `Permafail: ${reason}`;
-    jobElement.appendChild(warning);
 
     // Disable retest button
     const retestBtn = jobElement.querySelector('.job-actions button.btn:not(.btn-secondary)');
     if (retestBtn) {
         retestBtn.disabled = true;
     }
+}
+
+function showPermafailModal(reason) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('permafail-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'permafail-modal';
+        modal.className = 'permafail-modal';
+        modal.innerHTML = `
+            <div class="permafail-modal-content">
+                <div class="permafail-modal-header">
+                    <h3>
+                        <img src="/static/dumpster-fire.svg" width="24" height="24" alt="">
+                        Permafail Detected
+                    </h3>
+                    <button class="permafail-modal-close">&times;</button>
+                </div>
+                <div class="permafail-modal-body"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        // Close when clicking X or outside modal
+        modal.querySelector('.permafail-modal-close').onclick = () => {
+            modal.style.display = 'none';
+        };
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        };
+    }
+
+    // Update modal content and show
+    modal.querySelector('.permafail-modal-body').textContent = reason;
+    modal.style.display = 'block';
 }
 
 function clearPermafailUI(jobElement, jobKey) {

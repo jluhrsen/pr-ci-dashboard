@@ -235,20 +235,76 @@ h1 {
 
 /* Permafail indicator */
 .permafail-icon {
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     margin-left: 8px;
     vertical-align: middle;
+    cursor: pointer;
+    transition: transform 0.2s;
 }
 
-/* Warning banner for permafail reason */
-.permafail-warning {
-    font-size: 0.85em;
-    color: #856404;
-    background: #fff3cd;
-    padding: 4px 8px;
-    margin-top: 4px;
-    border-radius: 3px;
+.permafail-icon:hover {
+    transform: scale(1.1);
+}
+
+/* Permafail modal dialog */
+.permafail-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.permafail-modal-content {
+    background-color: var(--bg);
+    margin: 10% auto;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 80%;
+    max-width: 600px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.permafail-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.permafail-modal-header h3 {
+    margin: 0;
+    color: var(--error);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.permafail-modal-close {
+    color: var(--text-secondary);
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+    line-height: 1;
+}
+
+.permafail-modal-close:hover {
+    color: var(--text);
+}
+
+.permafail-modal-body {
+    color: var(--text);
+    line-height: 1.6;
 }
 
 /* Disabled retest button for permafails */
