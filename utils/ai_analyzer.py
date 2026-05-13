@@ -26,8 +26,7 @@ def analyze_permafail(job_urls, job_name, pr_info):
 
     cmd = [
         'claude',
-        '--print',
-        '--plugin-dir', project_root
+        '--print'
     ]
 
     try:

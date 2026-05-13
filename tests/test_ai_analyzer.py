@@ -39,8 +39,6 @@ def test_analyze_permafail_success():
         # Verify command arguments
         assert args[0] == 'claude'
         assert args[1] == '--print'
-        assert args[2] == '--plugin-dir'
-        # args[3] is the project root path
 
         # Verify prompt was passed via stdin
         assert 'input' in kwargs
