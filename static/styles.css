@@ -232,3 +232,53 @@ h1 {
     width: 100%;
     margin-top: 2rem;
 }
+
+/* Permafail indicator */
+.permafail-icon {
+    width: 24px;
+    height: 24px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* Warning banner for permafail reason */
+.permafail-warning {
+    font-size: 0.85em;
+    color: #856404;
+    background: #fff3cd;
+    padding: 4px 8px;
+    margin-top: 4px;
+    border-radius: 3px;
+}
+
+/* Disabled retest button for permafails */
+.retest-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #ccc;
+}
+
+/* Context menu */
+.context-menu {
+    position: absolute;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 1000;
+    min-width: 150px;
+}
+
+.context-menu-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #eee;
+}
+
+.context-menu-item:last-child {
+    border-bottom: none;
+}
+
+.context-menu-item:hover {
+    background: #f5f5f5;
+}
