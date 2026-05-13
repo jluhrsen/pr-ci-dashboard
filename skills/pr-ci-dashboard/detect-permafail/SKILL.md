@@ -1,0 +1,556 @@
+---
+name: Detect Permafail
+description: Analyze consecutive job failures to determine if they represent a permafail pattern
+---
+
+# Detect Permafail
+
+## When to Use This Skill
+
+Use this skill when you have 3 consecutive failures of the same job and need to determine if the failures represent a systematic/permanent failure (permafail) versus a flaky failure. This is critical for CI/CD pipeline analysis to distinguish between:
+
+- **Permafail**: A systematic failure affecting the same test(s) or infrastructure issue across all 3 runs
+- **Flaky**: Non-deterministic failures with varying root causes across runs
+
+## Prerequisites
+
+- Access to the `ci-prow-navigation` skill for analyzing Prow job logs
+- Access to the `Skill` tool for spawning parallel subagents to fetch job details concurrently
+- 3 URLs pointing to consecutive job failures (from Prow/OpenShift CI)
+- Job name context to verify consistency across the 3 failures
+- PR information to provide context for analysis
+
+## Implementation Steps
+
+### Step 1: Validate Inputs
+
+Verify that all required inputs are present and properly formatted:
+- `failure_urls`: Array of exactly 3 job URLs (must be consecutive runs)
+- `job_name`: String identifier of the job being analyzed
+- `pr_info`: Object containing PR number and repository context
+- Each URL must be a valid Prow job URL format
+
+Reject requests if:
+- URLs count is not exactly 3
+- URLs are not in sequential order (timestamp or build number validation)
+- Job names don't match across all URLs
+- PR context is missing
+
+### Step 2: Spawn Parallel Subagents Using Task Tool
+
+Create 3 parallel tasks to analyze each failure concurrently using the `Skill` tool:
+
+```
+Task 1: Analyze failure_urls[0] with ci-prow-navigation
+Task 2: Analyze failure_urls[1] with ci-prow-navigation
+Task 3: Analyze failure_urls[2] with ci-prow-navigation
+```
+
+Each subagent task should:
+- Invoke the `ci-prow-navigation` skill
+- Pass the job URL and job name as parameters
+- Be independent and non-blocking
+- Timeout after 60 seconds if the job analysis takes too long
+
+### Step 3: Invoke ci-prow-Navigation Skill
+
+Each subagent calls the `ci-prow-navigation` skill with parameters:
+- `job_url`: The specific Prow job URL
+- `job_name`: Name of the job being analyzed
+- `action`: "fetch_job_logs" or "analyze_failure"
+
+Expected response structure from ci-prow-navigation:
+```json
+{
+  "job_url": "string",
+  "job_name": "string",
+  "status": "FAILURE",
+  "failure_type": "test_failure | infra_failure",
+  "details": {
+    "tests": ["test1", "test2"],
+    "error_message": "string",
+    "log_snippet": "string"
+  }
+}
+```
+
+### Step 4: Extract Failure Signatures from Each Result
+
+Transform each ci-prow-navigation result into a normalized failure signature:
+
+**For test failures:**
+```json
+{
+  "type": "test_failure",
+  "url": "job_url",
+  "tests": ["failing_test_name1", "failing_test_name2"],
+  "test_count": 2
+}
+```
+
+**For infrastructure failures:**
+```json
+{
+  "type": "infra_failure",
+  "url": "job_url",
+  "error": "normalized_error_message",
+  "error_hash": "md5_of_error_message"
+}
+```
+
+Extract and normalize error messages:
+- Remove timestamps and build IDs
+- Remove stack traces
+- Keep the error classification and core message
+- Generate MD5 hash for quick comparison
+
+### Step 5: Compare Signatures for Permafail Pattern
+
+Apply permafail detection logic based on failure types:
+
+**Pattern 1: All 3 are test_failure**
+- Extract all unique test names from the 3 signatures
+- Calculate intersection: tests that appear in ALL 3 failures
+- If intersection has ≥1 test name: **PERMAFAIL = TRUE**
+- If intersection is empty: **PERMAFAIL = FALSE** (different tests failing)
+
+**Pattern 2: All 3 are infra_failure**
+- Compare error_hash values from all 3 signatures
+- Calculate similarity of error messages (Levenshtein distance or simple substring matching)
+- If ≥2 error messages match exactly OR >70% character similarity: **PERMAFAIL = TRUE**
+- Otherwise: **PERMAFAIL = FALSE**
+
+**Pattern 3: Mixed failure types**
+- Any combination of test_failure and infra_failure
+- **PERMAFAIL = FALSE** by definition (not a consistent pattern)
+
+### Step 6: Generate Verdict and Return JSON
+
+Construct the final response object with:
+- Boolean verdict: `permafail` (true/false)
+- Reason string explaining the determination
+- Complete failure signatures array
+- Common tests array (if applicable and permafail=true)
+- Confidence score (0.0-1.0)
+
+## Output Format
+
+The skill returns a JSON object with this schema:
+
+```json
+{
+  "permafail": true,
+  "confidence": 0.95,
+  "reason": "All 3 runs show the same failing test 'test_node_scale' - consistent permanent failure",
+  "failure_type": "test_failure",
+  "signatures": [
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://bucket/logs/...",
+      "tests": ["test_node_scale"],
+      "test_count": 1
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://bucket/logs/...",
+      "tests": ["test_node_scale"],
+      "test_count": 1
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://bucket/logs/...",
+      "tests": ["test_node_scale"],
+      "test_count": 1
+    }
+  ],
+  "common_tests": ["test_node_scale"]
+}
+```
+
+### For Infrastructure Failure (permafail=true)
+
+```json
+{
+  "permafail": true,
+  "confidence": 0.92,
+  "reason": "All 3 runs fail at cluster creation with identical error: 'Insufficient quota for machine type n1-standard-4'",
+  "failure_type": "infra_failure",
+  "signatures": [
+    {
+      "type": "infra_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://bucket/logs/...",
+      "error": "Insufficient quota for machine type n1-standard-4",
+      "error_hash": "a1b2c3d4e5f6g7h8"
+    },
+    {
+      "type": "infra_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://bucket/logs/...",
+      "error": "Insufficient quota for machine type n1-standard-4",
+      "error_hash": "a1b2c3d4e5f6g7h8"
+    },
+    {
+      "type": "infra_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://bucket/logs/...",
+      "error": "Insufficient quota for machine type n1-standard-4",
+      "error_hash": "a1b2c3d4e5f6g7h8"
+    }
+  ]
+}
+```
+
+### For Non-Permafail (mixed or varying failures)
+
+```json
+{
+  "permafail": false,
+  "confidence": 0.88,
+  "reason": "Mixed failure types detected: Run 1 is test_failure, Run 2 is infra_failure, Run 3 is test_failure. Inconsistent pattern indicates flaky behavior, not a systematic permafail.",
+  "failure_type": "mixed",
+  "signatures": [
+    {
+      "type": "test_failure",
+      "url": "...",
+      "tests": ["test_networking"],
+      "test_count": 1
+    },
+    {
+      "type": "infra_failure",
+      "url": "...",
+      "error": "Pod evicted due to memory pressure",
+      "error_hash": "x1y2z3a4b5c6d7e8"
+    },
+    {
+      "type": "test_failure",
+      "url": "...",
+      "tests": ["test_storage", "test_deployment"],
+      "test_count": 2
+    }
+  ]
+}
+```
+
+## Failure Signature Format
+
+### Test Failure Signature
+
+```json
+{
+  "type": "test_failure",
+  "url": "string (job URL)",
+  "tests": ["array", "of", "failing_test_names"],
+  "test_count": "integer (length of tests array)"
+}
+```
+
+**Fields:**
+- `type`: Always "test_failure"
+- `url`: The Prow job URL for this run
+- `tests`: Array of test names extracted from failure logs (deduplicated)
+- `test_count`: Count of unique failing tests
+
+### Infrastructure Failure Signature
+
+```json
+{
+  "type": "infra_failure",
+  "url": "string (job URL)",
+  "error": "string (normalized error message)",
+  "error_hash": "string (MD5 hash of normalized error)"
+}
+```
+
+**Fields:**
+- `type`: Always "infra_failure"
+- `url`: The Prow job URL for this run
+- `error`: Normalized error message with timestamps and build IDs removed
+- `error_hash`: MD5 hash for fast similarity comparison
+
+## Permafail Detection Logic
+
+### Test Failure Logic
+
+1. Collect all unique test names from failures 1, 2, and 3
+2. Find the intersection: tests that appear in ALL 3 failures
+3. **Permafail = TRUE** if intersection size ≥ 1
+4. Set confidence based on:
+   - 100% if all 3 have identical test set (confidence: 0.99)
+   - 95% if all 3 have ≥1 common test (confidence: 0.95)
+   - 85% if 2 of 3 have common tests (confidence: 0.85)
+
+### Infrastructure Failure Logic
+
+1. Extract error messages from all 3 failures
+2. Compare error_hash values:
+   - If all 3 hashes are identical: **Permafail = TRUE** (confidence: 0.99)
+3. If hashes differ, perform string similarity check on error messages:
+   - Calculate Levenshtein distance or use simple substring matching
+   - If ≥2 errors are >80% similar: **Permafail = TRUE** (confidence: 0.92)
+   - Otherwise: **Permafail = FALSE** (confidence: 0.70)
+
+### Mixed Type Logic
+
+Any mixture of test_failure and infra_failure types:
+- **Permafail = FALSE** (confidence: 0.85)
+- Reason: "Mixed failure types indicate non-deterministic/flaky behavior"
+
+## Error Handling
+
+### Scenario 1: ci-prow-Navigation Skill Unavailable
+
+If the ci-prow-navigation skill cannot be invoked:
+- Return status: "error"
+- Return error message: "ci-prow-navigation skill unavailable"
+- Fallback: Attempt to parse job URLs directly (if implemented)
+- Do NOT return a permafail verdict
+
+**Response:**
+```json
+{
+  "status": "error",
+  "error": "ci-prow-navigation skill unavailable. Required for job analysis.",
+  "action": "check_skill_availability"
+}
+```
+
+### Scenario 2: Timeout on Job Analysis
+
+If a subagent task exceeds 60 seconds:
+- Log the timeout event
+- Continue with results from successful tasks if ≥2 completed
+- If only 1 or 0 tasks completed: Return error
+
+**Response:**
+```json
+{
+  "status": "error",
+  "error": "Analysis timeout: Only 2 of 3 jobs analyzed successfully. Insufficient data for permafail determination.",
+  "completed_jobs": 2,
+  "action": "retry_with_single_job"
+}
+```
+
+### Scenario 3: Invalid Job URLs
+
+If URL validation fails:
+- Return status: "error"
+- Return specific validation error message
+- Do NOT attempt analysis
+
+**Response:**
+```json
+{
+  "status": "error",
+  "error": "Invalid job URL format: 'url3' is not a valid Prow job URL",
+  "invalid_url": "url3",
+  "action": "provide_valid_urls"
+}
+```
+
+### Scenario 4: Job Names Don't Match
+
+If the job_name parameter doesn't match the actual job names extracted from URLs:
+- Return status: "error"
+- Return the expected vs actual job names
+
+**Response:**
+```json
+{
+  "status": "error",
+  "error": "Job name mismatch. Expected 'pull-ci-job-xyz' but found 'pull-ci-job-abc' in run 2",
+  "expected_job": "pull-ci-job-xyz",
+  "actual_job": "pull-ci-job-abc",
+  "action": "provide_matching_job_urls"
+}
+```
+
+### Scenario 5: Failure to Extract Failure Details
+
+If the ci-prow-navigation response doesn't contain expected failure information:
+- Mark this run as "incomplete"
+- Continue with other runs
+- If ≥2 runs have valid failure data, proceed with analysis
+- Otherwise, return error
+
+**Response:**
+```json
+{
+  "status": "incomplete",
+  "warning": "Run 1 analysis incomplete: could not extract failure details",
+  "completed_jobs": 2,
+  "incomplete_jobs": 1,
+  "permafail": "unknown",
+  "recommendation": "Review job logs manually or retry analysis"
+}
+```
+
+## Examples
+
+### Example 1: Permafail - Identical Failing Test
+
+**Input:**
+```json
+{
+  "failure_urls": [
+    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/1234567",
+    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/1234568",
+    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/1234569"
+  ],
+  "job_name": "pull-ci-openshift-origin-master-e2e-aws",
+  "pr_info": {
+    "pr_number": 12345,
+    "repository": "openshift/origin"
+  }
+}
+```
+
+**ci-prow-navigation Results for all 3 runs:**
+- Run 1: Failed tests = ["[sig-api] API discovery should provide capability information"]
+- Run 2: Failed tests = ["[sig-api] API discovery should provide capability information"]
+- Run 3: Failed tests = ["[sig-api] API discovery should provide capability information"]
+
+**Output:**
+```json
+{
+  "permafail": true,
+  "confidence": 0.99,
+  "reason": "All 3 consecutive runs fail with identical test: '[sig-api] API discovery should provide capability information'. This is a systematic permanent failure.",
+  "failure_type": "test_failure",
+  "signatures": [
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/1234567",
+      "tests": ["[sig-api] API discovery should provide capability information"],
+      "test_count": 1
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/1234568",
+      "tests": ["[sig-api] API discovery should provide capability information"],
+      "test_count": 1
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/1234569",
+      "tests": ["[sig-api] API discovery should provide capability information"],
+      "test_count": 1
+    }
+  ],
+  "common_tests": ["[sig-api] API discovery should provide capability information"]
+}
+```
+
+### Example 2: Non-Permafail - Mixed Failure Types
+
+**Input:**
+```json
+{
+  "failure_urls": [
+    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234567",
+    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234568",
+    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234569"
+  ],
+  "job_name": "pull-ci-openshift-origin-master-e2e-aws",
+  "pr_info": {
+    "pr_number": 54321,
+    "repository": "openshift/origin"
+  }
+}
+```
+
+**ci-prow-navigation Results:**
+- Run 1: Failed tests = ["[sig-network] networking should support networking"] (test_failure)
+- Run 2: Infrastructure failure = "Pod evicted: insufficient memory" (infra_failure)
+- Run 3: Failed tests = ["[sig-storage] storage should support volumes"] (test_failure)
+
+**Output:**
+```json
+{
+  "permafail": false,
+  "confidence": 0.85,
+  "reason": "Mixed failure types detected across 3 runs: test_failure, infra_failure, test_failure. Different tests failing in runs 1 and 3 with infrastructure issue in run 2 indicates flaky/non-deterministic behavior, not a systematic permafail pattern.",
+  "failure_type": "mixed",
+  "signatures": [
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234567",
+      "tests": ["[sig-network] networking should support networking"],
+      "test_count": 1
+    },
+    {
+      "type": "infra_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234568",
+      "error": "Pod evicted: insufficient memory",
+      "error_hash": "f4g5h6i7j8k9l0m1"
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234569",
+      "tests": ["[sig-storage] storage should support volumes"],
+      "test_count": 1
+    }
+  ]
+}
+```
+
+## Technical Details
+
+### How ci-prow-Navigation Is Used
+
+The `ci-prow-navigation` skill serves as the abstraction layer for accessing Prow job data. This skill:
+
+1. **Accepts a job URL** and navigates the Prow UI/logs
+2. **Extracts failure information** from structured test output and logs
+3. **Returns normalized data** in a consistent format regardless of Prow version or test framework
+
+This decoupling allows the detect-permafail skill to remain stable even as the underlying Prow infrastructure changes.
+
+### Parallel Execution Strategy
+
+Three independent tasks are spawned using the `Skill` tool:
+
+```
+Subagent 1 ━━━ ci-prow-navigation(url[0]) ━━━┐
+Subagent 2 ━━━ ci-prow-navigation(url[1]) ━━━┼━━━ Wait for all ━━━ Compare signatures
+Subagent 3 ━━━ ci-prow-navigation(url[2]) ━━━┘
+```
+
+**Benefits:**
+- All 3 job analyses run concurrently (3x faster than sequential)
+- If one task fails, others continue (fault tolerance)
+- Better utilization of available resources
+
+**Synchronization:**
+- Use Promise.all() or equivalent in implementation
+- 60-second timeout per subagent task
+- Require ≥2 successful results to proceed with analysis
+
+### Error Message Normalization
+
+Normalize infrastructure error messages for comparison:
+
+1. Remove timestamps: `2025-05-12T14:32:10Z` → ""
+2. Remove build IDs: `build-12345-xyz` → ""
+3. Remove resource names with IDs: `pod-abc123xyz` → "pod-*"
+4. Remove request/limit values: Numbers in memory/CPU specs → ""
+5. Keep: Error classification, core message, error type
+
+**Example normalization:**
+```
+Input:  "Pod evicted at 2025-05-12T14:32:10Z (build-12345): insufficient memory (512M < 1Gi required)"
+Output: "Pod evicted: insufficient memory (* < *Gi required)"
+```
+
+### Confidence Scoring
+
+Confidence reflects how certain the permafail verdict is:
+
+- **0.99**: All 3 runs have identical failure signature (test names or error hashes)
+- **0.95**: All 3 runs have ≥1 common failing test in test_failure
+- **0.92**: All 3 runs have >80% similar error messages in infra_failure
+- **0.85**: 2 of 3 runs share common failure or mixed types detected
+- **0.70**: Insufficient data or ambiguous failure patterns
+
+Use confidence to determine remediation priority:
+- Confidence ≥ 0.95: High priority permafail, block PR merge
+- Confidence 0.85-0.94: Medium priority, warn but allow manual override
+- Confidence < 0.85: Low confidence verdict, require manual review

@@ -1,0 +1,8 @@
+{
+  "name": "pr-ci-dashboard",
+  "version": "0.1.0",
+  "description": "OpenShift PR CI Dashboard helpers",
+  "skills": [
+    "skills/pr-ci-dashboard/detect-permafail"
+  ]
+}
