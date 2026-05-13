@@ -46,18 +46,46 @@ def analyze_permafail(job_urls, job_name, pr_info):
                 "signatures": []
             }
 
-        return json.loads(result.stdout)
+        # Extract JSON from output (skill may output explanatory text before JSON)
+        output = result.stdout.strip()
+
+        if not output:
+            return {
+                "permafail": False,
+                "error": "Skill returned empty output",
+                "signatures": []
+            }
+
+        # Try parsing as pure JSON first
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError:
+            pass
+
+        # If that fails, try to find JSON object in output
+        # Look for the last occurrence of a complete JSON object
+        json_start = output.rfind('{')
+        if json_start == -1:
+            return {
+                "permafail": False,
+                "error": f"No JSON found in skill output. Output: {output[:200]}",
+                "signatures": []
+            }
+
+        json_str = output[json_start:]
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            return {
+                "permafail": False,
+                "error": f"Failed to parse JSON from output: {e}. Output snippet: {output[:200]}",
+                "signatures": []
+            }
 
     except subprocess.TimeoutExpired:
         return {
             "permafail": False,
             "error": "Analysis timed out after 5 minutes",
-            "signatures": []
-        }
-    except json.JSONDecodeError as e:
-        return {
-            "permafail": False,
-            "error": f"Failed to parse skill output: {e}",
             "signatures": []
         }
     except Exception as e:

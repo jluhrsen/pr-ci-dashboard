@@ -104,7 +104,7 @@ def test_analyze_permafail_invalid_json():
         result = analyze_permafail(job_urls, job_name, pr_info)
 
         assert result["permafail"] is False
-        assert "Failed to parse skill output" in result["error"]
+        assert "No JSON found in skill output" in result["error"]
         assert result["signatures"] == []
 
 
