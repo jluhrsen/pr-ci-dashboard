@@ -6,8 +6,12 @@ from utils.gh_auth import check_gh_auth
 from api.search import search_prs
 from api.jobs import get_pr_jobs
 from api.retest import retest_jobs
+from api.analysis import analysis_bp
 
 app = Flask(__name__)
+
+# Register blueprints
+app.register_blueprint(analysis_bp)
 
 # Global state
 DEFAULT_QUERY = "is:pr is:open archived:false author:openshift-pr-manager[bot]"
