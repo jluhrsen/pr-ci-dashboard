@@ -27,13 +27,13 @@ def analyze_permafail(job_urls, job_name, pr_info):
     cmd = [
         'claude',
         '--print',
-        '--plugin-dir', project_root,
-        prompt
+        '--plugin-dir', project_root
     ]
 
     try:
         result = subprocess.run(
             cmd,
+            input=prompt,  # Pass prompt via stdin
             capture_output=True,
             text=True,
             timeout=300  # 5 minute timeout
