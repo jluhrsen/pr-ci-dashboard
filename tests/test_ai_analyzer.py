@@ -34,9 +34,15 @@ def test_analyze_permafail_success():
         # Verify subprocess was called correctly
         assert mock_run.called
         args = mock_run.call_args[0][0]
-        assert args[0] == 'claude-code'
-        assert args[1] == 'skill'
-        assert args[2] == 'pr-ci-dashboard:detect-permafail'
+        assert args[0] == 'claude'
+        assert args[1] == '--print'
+        assert args[2] == '--plugin-dir'
+        # args[3] is the project root path
+        # args[4] is the prompt with /pr-ci-dashboard:detect-permafail command
+        assert '/pr-ci-dashboard:detect-permafail' in args[4]
+        assert f'--job-urls={json.dumps(job_urls)}' in args[4]
+        assert f'--job-name={job_name}' in args[4]
+        assert f'--pr={pr_info}' in args[4]
 
         # Verify result
         assert result["permafail"] is True
