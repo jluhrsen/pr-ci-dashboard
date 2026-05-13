@@ -10,6 +10,9 @@ const retestedJobs = new Map();
 const POLL_INTERVAL = 5000; // 5 seconds
 const MAX_POLL_TIME = 5 * 60 * 1000; // 5 minutes
 
+// Permafail tracking
+const permafailJobs = new Map(); // jobKey -> {permafail: bool, reason: str, override: bool}
+
 // DOM element cache
 const DOM = {
     searchInput: null,
@@ -116,6 +119,53 @@ function getAge(createdAt) {
 function isJobRetesting(owner, repo, number, jobName) {
     const jobKey = `${owner}/${repo}/${number}/${jobName}`;
     return retestedJobs.has(jobKey);
+}
+
+function renderPermafailIcon(jobElement, reason) {
+    const jobHeader = jobElement.querySelector('.job-header') || jobElement;
+
+    // Remove existing icon if present
+    const existing = jobElement.querySelector('.permafail-icon');
+    if (existing) existing.remove();
+
+    // Add dumpster fire icon
+    const icon = document.createElement('img');
+    icon.src = '/static/dumpster-fire.svg';
+    icon.className = 'permafail-icon';
+    icon.alt = 'Permafail detected';
+    icon.title = reason;
+    jobHeader.appendChild(icon);
+
+    // Add warning banner
+    const warning = document.createElement('div');
+    warning.className = 'permafail-warning';
+    warning.textContent = `Permafail: ${reason}`;
+    jobElement.appendChild(warning);
+
+    // Disable retest button
+    const retestBtn = jobElement.querySelector('.retest-btn');
+    if (retestBtn) {
+        retestBtn.disabled = true;
+    }
+}
+
+function clearPermafailUI(jobElement, jobKey) {
+    // Remove icon
+    const icon = jobElement.querySelector('.permafail-icon');
+    if (icon) icon.remove();
+
+    // Remove warning
+    const warning = jobElement.querySelector('.permafail-warning');
+    if (warning) warning.remove();
+
+    // Re-enable retest button
+    const retestBtn = jobElement.querySelector('.retest-btn');
+    if (retestBtn) {
+        retestBtn.disabled = false;
+    }
+
+    // Update state
+    permafailJobs.delete(jobKey);
 }
 
 // ========================================
