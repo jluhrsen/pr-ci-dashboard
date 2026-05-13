@@ -27,6 +27,36 @@ curl -fsSL https://raw.githubusercontent.com/jluhrsen/pr-ci-dashboard/main/run.s
 - One-click retest via local `gh` CLI
 - Auto-polling after retest to detect when jobs start running
 
+## Permafail Detection
+
+The dashboard automatically detects **permafails** - jobs with systematic failure patterns across multiple runs.
+
+### How It Works
+
+1. **Auto-retest logic:**
+   - 1st consecutive failure → Auto-retest immediately
+   - 2nd consecutive failure → Auto-retest immediately
+   - 3rd consecutive failure → Trigger AI analysis
+
+2. **AI analysis:** Uses Claude Code CLI to analyze failure signatures across 3 runs
+   - Detects if the same test case fails in all runs
+   - Detects if the same infrastructure error occurs in all runs
+
+3. **Visual indicator:** Permafails are marked with a 🗑️🔥 dumpster fire icon
+   - Retest button is disabled
+   - Warning shows the failure reason
+
+4. **Override:** Right-click a job card → "Clear permafail" to re-enable retesting
+
+### Requirements
+
+- Claude Code CLI installed and available in PATH
+- `ci-prow-navigation` skill available (from OpenShift CI plugin)
+
+### Database
+
+Analysis results are cached in `dashboard.db` (SQLite) to avoid redundant AI calls.
+
 ## Prerequisites
 
 - **Python 3.8+**
