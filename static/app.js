@@ -185,12 +185,21 @@ function showPermafailModal(reason) {
         document.body.appendChild(modal);
 
         // Close when clicking X or outside modal
-        modal.querySelector('.permafail-modal-close').onclick = () => {
+        const closeModal = () => {
             modal.style.display = 'none';
+            document.removeEventListener('keydown', handleEscape);
         };
+
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        };
+
+        modal.querySelector('.permafail-modal-close').onclick = closeModal;
         modal.onclick = (e) => {
             if (e.target === modal) {
-                modal.style.display = 'none';
+                closeModal();
             }
         };
     }
@@ -198,6 +207,15 @@ function showPermafailModal(reason) {
     // Update modal content and show
     modal.querySelector('.permafail-modal-body').textContent = reason;
     modal.style.display = 'block';
+
+    // Add escape key listener
+    const handleEscape = (e) => {
+        if (e.key === 'Escape' && modal.style.display === 'block') {
+            modal.style.display = 'none';
+            document.removeEventListener('keydown', handleEscape);
+        }
+    };
+    document.addEventListener('keydown', handleEscape);
 }
 
 function clearPermafailUI(jobElement, jobKey) {
