@@ -243,3 +243,79 @@ def test_status_endpoint_returns_batch_status(client, tmp_path):
 
     assert "https://prow.ci.openshift.org/view/2" in data
     assert data["https://prow.ci.openshift.org/view/2"]["permafail"] is False
+
+
+def test_override_endpoint_invalid_json(client):
+    """Test POST /api/jobs/override rejects invalid JSON"""
+    response = client.post(
+        '/api/jobs/override',
+        data='not valid json',
+        content_type='application/json'
+    )
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "error" in data
+    assert "Invalid JSON" in data["error"]
+
+
+def test_override_endpoint_missing_job_url(client):
+    """Test POST /api/jobs/override rejects missing job_url field"""
+    response = client.post(
+        '/api/jobs/override',
+        data=json.dumps({"other_field": "value"}),
+        content_type='application/json'
+    )
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "error" in data
+    assert "Missing job_url" in data["error"]
+
+
+def test_override_endpoint_database_failure(client):
+    """Test POST /api/jobs/override handles database failure"""
+    with patch('api.analysis.clear_override', side_effect=RuntimeError("DB operation failed")):
+        response = client.post(
+            '/api/jobs/override',
+            data=json.dumps({"job_url": "https://prow.ci.openshift.org/view/12345"}),
+            content_type='application/json'
+        )
+
+    assert response.status_code == 500
+    data = json.loads(response.data)
+    assert "error" in data
+    assert "Internal server error" in data["error"]
+
+
+def test_status_endpoint_missing_job_urls(client):
+    """Test GET /api/jobs/status rejects missing job_urls parameter"""
+    response = client.get('/api/jobs/status')
+
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "error" in data
+    assert "Missing job_urls parameter" in data["error"]
+
+
+def test_status_endpoint_invalid_json(client):
+    """Test GET /api/jobs/status rejects invalid JSON in query parameter"""
+    response = client.get('/api/jobs/status?job_urls=not valid json')
+
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "error" in data
+    assert "Invalid JSON in job_urls" in data["error"]
+
+
+def test_status_endpoint_database_failure(client):
+    """Test GET /api/jobs/status handles database failure"""
+    with patch('api.analysis.get_permafail_status', side_effect=RuntimeError("DB query failed")):
+        response = client.get(
+            '/api/jobs/status?job_urls=' + json.dumps([
+                "https://prow.ci.openshift.org/view/1"
+            ])
+        )
+
+    assert response.status_code == 500
+    data = json.loads(response.data)
+    assert "error" in data
+    assert "Internal server error" in data["error"]
