@@ -15,15 +15,20 @@ def analyze_permafail(job_urls, job_name, pr_info):
         dict: Analysis result with permafail verdict and signatures.
               On error, returns dict with permafail=False, error message, and empty signatures list.
     """
+    import os
+
+    # Get the project root directory (where .claude-plugin/ exists)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # Build prompt to invoke the skill
     urls_json = json.dumps(job_urls)
+    prompt = f"/pr-ci-dashboard:detect-permafail --job-urls={urls_json} --job-name={job_name} --pr={pr_info}"
 
     cmd = [
-        'claude-code',
-        'skill',
-        'pr-ci-dashboard:detect-permafail',
-        f'--job-urls={urls_json}',
-        f'--job-name={job_name}',
-        f'--pr={pr_info}'
+        'claude',
+        '--print',
+        '--plugin-dir', project_root,
+        prompt
     ]
 
     try:
