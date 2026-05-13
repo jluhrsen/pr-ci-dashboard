@@ -273,7 +273,7 @@ def test_override_endpoint_missing_job_url(client):
 
 def test_override_endpoint_database_failure(client):
     """Test POST /api/jobs/override handles database failure"""
-    with patch('api.analysis.clear_override', side_effect=RuntimeError("DB operation failed")):
+    with patch('api.analysis.set_override', side_effect=RuntimeError("DB operation failed")):
         response = client.post(
             '/api/jobs/override',
             data=json.dumps({"job_url": "https://prow.ci.openshift.org/view/12345"}),

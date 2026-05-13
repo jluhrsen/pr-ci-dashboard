@@ -1,7 +1,7 @@
 # api/analysis.py
 import json
 from flask import Blueprint, request, jsonify, current_app
-from utils.db import store_analysis, get_permafail_status, clear_override
+from utils.db import store_analysis, get_permafail_status, set_override
 from utils.ai_analyzer import analyze_permafail
 
 analysis_bp = Blueprint('analysis', __name__)
@@ -108,7 +108,7 @@ def override_permafail():
 
     try:
         db_path = current_app.config.get('DB_PATH')
-        clear_override(data['job_url'], db_path=db_path)
+        set_override(data['job_url'], db_path=db_path)
 
         return jsonify({"success": True})
 
