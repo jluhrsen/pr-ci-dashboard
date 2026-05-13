@@ -3,6 +3,7 @@ import sys
 from flask import Flask, jsonify, request, render_template
 from utils.script_fetcher import fetch_scripts
 from utils.gh_auth import check_gh_auth
+from utils.db import init_db
 from api.search import search_prs
 from api.jobs import get_pr_jobs
 from api.retest import retest_jobs
@@ -90,6 +91,15 @@ def main():
 
     # Parse CLI arguments
     parse_cli_args()
+
+    # Initialize database
+    try:
+        init_db()
+        print("✅ Database initialized")
+    except Exception as e:
+        print(f"❌ Failed to initialize database: {e}")
+        print("Cannot start dashboard without database.")
+        sys.exit(1)
 
     # Fetch scripts from GitHub
     try:
