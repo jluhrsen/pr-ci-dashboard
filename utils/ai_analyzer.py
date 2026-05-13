@@ -87,6 +87,13 @@ Return ONLY the final JSON result with no additional explanation."""
                 "signatures": []
             }
 
+        # Strip markdown code fences if present
+        import re
+        # Match ```json or ``` at start, and ``` at end
+        output = re.sub(r'^```(?:json)?\s*', '', output)
+        output = re.sub(r'\s*```\s*$', '', output)
+        output = output.strip()
+
         # Try parsing as pure JSON first
         try:
             return json.loads(output)
