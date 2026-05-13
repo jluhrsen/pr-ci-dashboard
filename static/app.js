@@ -122,7 +122,7 @@ function isJobRetesting(owner, repo, number, jobName) {
 }
 
 function renderPermafailIcon(jobElement, reason) {
-    const jobHeader = jobElement.querySelector('.job-header') || jobElement;
+    const jobHeader = jobElement.querySelector('.job-name') || jobElement;
 
     // Remove existing icon if present
     const existing = jobElement.querySelector('.permafail-icon');
@@ -143,7 +143,7 @@ function renderPermafailIcon(jobElement, reason) {
     jobElement.appendChild(warning);
 
     // Disable retest button
-    const retestBtn = jobElement.querySelector('.retest-btn');
+    const retestBtn = jobElement.querySelector('.job-actions button.btn:not(.btn-secondary)');
     if (retestBtn) {
         retestBtn.disabled = true;
     }
@@ -159,7 +159,7 @@ function clearPermafailUI(jobElement, jobKey) {
     if (warning) warning.remove();
 
     // Re-enable retest button
-    const retestBtn = jobElement.querySelector('.retest-btn');
+    const retestBtn = jobElement.querySelector('.job-actions button.btn:not(.btn-secondary)');
     if (retestBtn) {
         retestBtn.disabled = false;
     }
