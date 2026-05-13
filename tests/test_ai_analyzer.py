@@ -43,10 +43,10 @@ def test_analyze_permafail_success():
         # Verify prompt was passed via stdin
         assert 'input' in kwargs
         prompt = kwargs['input']
-        assert '/pr-ci-dashboard:detect-permafail' in prompt
-        assert f'--job-urls={json.dumps(job_urls)}' in prompt
-        assert f'--job-name={job_name}' in prompt
-        assert f'--pr={pr_info}' in prompt
+        assert 'pr-ci-dashboard:detect-permafail' in prompt
+        assert json.dumps(job_urls) in prompt
+        assert job_name in prompt
+        assert pr_info in prompt
 
         # Verify result
         assert result["permafail"] is True

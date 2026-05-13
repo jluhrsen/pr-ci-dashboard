@@ -20,9 +20,14 @@ def analyze_permafail(job_urls, job_name, pr_info):
     # Get the project root directory (where .claude-plugin/ exists)
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    # Build prompt to invoke the skill
+    # Build prompt to invoke the skill using natural language (--print mode doesn't support slash commands)
     urls_json = json.dumps(job_urls)
-    prompt = f"/pr-ci-dashboard:detect-permafail --job-urls={urls_json} --job-name={job_name} --pr={pr_info}"
+    prompt = f"""Use the pr-ci-dashboard:detect-permafail skill to analyze these job failures:
+- job-urls: {urls_json}
+- job-name: {job_name}
+- pr: {pr_info}
+
+Execute the skill and return ONLY the final JSON result with no additional explanation."""
 
     cmd = [
         'claude',

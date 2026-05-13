@@ -1,7 +1,10 @@
 ---
-name: Detect Permafail
 description: Analyze consecutive job failures to determine if they represent a permafail pattern
+argument-hint: --job-urls=<urls> --job-name=<name> --pr=<pr-info>
 ---
+
+## Name
+pr-ci-dashboard:detect-permafail
 
 # Detect Permafail
 
