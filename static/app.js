@@ -524,6 +524,70 @@ function createRetestAllButton(owner, repo, number, displayType, jobType, active
 }
 
 // ========================================
+// Permafail Detection
+// ========================================
+async function fetchPermafailStatus(jobUrls) {
+    try {
+        const response = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify(jobUrls))}`);
+        if (!response.ok) return {};
+        return await response.json();
+    } catch (error) {
+        console.error('Failed to fetch permafail status:', error);
+        return {};
+    }
+}
+
+async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
+    const jobKey = `${owner}/${repo}/${pr}/${job.name}`;
+
+    if (consecutiveFailures <= 2) {
+        // 1st or 2nd failure: would auto-retest immediately (future enhancement)
+        return;
+    }
+
+    if (consecutiveFailures === 3) {
+        // 3rd failure: check for permafail
+        const jobUrls = job.urls || [];
+
+        if (jobUrls.length < 3) {
+            // Not enough data, would allow retest (future enhancement)
+            return;
+        }
+
+        // Trigger analysis
+        try {
+            const response = await fetch('/api/jobs/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pr: `${owner}/${repo}#${pr}`,
+                    repo: `${owner}/${repo}`,
+                    job_name: job.name,
+                    job_urls: jobUrls.slice(0, 3)
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.permafail) {
+                // Mark as permafail, disable retest
+                const jobElement = document.querySelector(`[data-job-url="${jobUrls[0]}"]`);
+                if (jobElement) {
+                    renderPermafailIcon(jobElement, result.reason);
+                    permafailJobs.set(jobKey, result);
+                }
+                return; // Don't retest
+            }
+        } catch (error) {
+            console.error('Permafail analysis failed:', error);
+            // Fail open: allow retest
+        }
+
+        // Not a permafail, continue retesting (future enhancement)
+    }
+}
+
+// ========================================
 // Retest Logic
 // ========================================
 async function retestJob(owner, repo, pr, jobs, type) {
@@ -577,7 +641,7 @@ function trackRetestedJobs(owner, repo, pr, jobs) {
         const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
         const startTime = Date.now();
 
-        const pollInterval = setInterval(() => {
+        const pollInterval = setInterval(async () => {
             const elapsed = Date.now() - startTime;
 
             if (elapsed > MAX_POLL_TIME) {
@@ -588,12 +652,35 @@ function trackRetestedJobs(owner, repo, pr, jobs) {
 
             const card = document.getElementById(`pr-${owner}-${repo}-${pr}`);
             if (card) {
-                loadPRJobs(owner, repo, pr, card);
+                // Load updated job data
+                await loadPRJobs(owner, repo, pr, card);
+
+                // Check if job is still failed with 3+ consecutive failures
+                await checkForPermafail(owner, repo, pr, jobName);
             }
         }, POLL_INTERVAL);
 
         retestedJobs.set(jobKey, { startTime, pollInterval });
     });
+}
+
+async function checkForPermafail(owner, repo, pr, jobName) {
+    try {
+        // Fetch current job data
+        const response = await fetch(`/api/pr/${owner}/${repo}/${pr}`);
+        const data = await response.json();
+
+        // Check both e2e and payload jobs
+        const allFailedJobs = [...(data.e2e?.failed || []), ...(data.payload?.failed || [])];
+        const job = allFailedJobs.find(j => j.name === jobName);
+
+        if (job && job.consecutive >= 3) {
+            // Job is still failed with 3+ consecutive failures - check for permafail
+            await handleFailedJob(job, job.consecutive, owner, repo, pr);
+        }
+    } catch (error) {
+        console.error('Failed to check for permafail:', error);
+    }
 }
 
 function disableAllRetestButtons() {
