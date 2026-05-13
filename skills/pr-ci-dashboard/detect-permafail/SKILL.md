@@ -36,7 +36,7 @@ Reject requests if:
 - Job names don't match across all URLs
 - PR context is missing
 
-### Step 2: Spawn Parallel Subagents Using Task Tool
+### Step 2: Spawn Parallel Subagents Using Skill Tool
 
 Create 3 parallel tasks to analyze each failure concurrently using the `Skill` tool:
 
@@ -50,14 +50,13 @@ Each subagent task should:
 - Invoke the `ci-prow-navigation` skill
 - Pass the job URL and job name as parameters
 - Be independent and non-blocking
-- Timeout after 60 seconds if the job analysis takes too long
+- Timeout after 60 seconds per subagent (5 minutes total for all 3 in parallel)
 
 ### Step 3: Invoke ci-prow-Navigation Skill
 
 Each subagent calls the `ci-prow-navigation` skill with parameters:
 - `job_url`: The specific Prow job URL
 - `job_name`: Name of the job being analyzed
-- `action`: "fetch_job_logs" or "analyze_failure"
 
 Expected response structure from ci-prow-navigation:
 ```json
