@@ -10,6 +10,10 @@ const retestedJobs = new Map();
 const POLL_INTERVAL = 5000; // 5 seconds
 const MAX_POLL_TIME = 5 * 60 * 1000; // 5 minutes
 
+// Permafail detection thresholds
+const MAX_AUTO_RETEST_FAILURES = 2; // Auto-retest up to 2 consecutive failures
+const PERMAFAIL_CHECK_THRESHOLD = 3; // Check for permafail on 3rd consecutive failure
+
 // Permafail tracking
 const permafailJobs = new Map(); // jobKey -> {permafail: bool, reason: str, override: bool}
 
@@ -526,30 +530,19 @@ function createRetestAllButton(owner, repo, number, displayType, jobType, active
 // ========================================
 // Permafail Detection
 // ========================================
-async function fetchPermafailStatus(jobUrls) {
-    try {
-        const response = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify(jobUrls))}`);
-        if (!response.ok) return {};
-        return await response.json();
-    } catch (error) {
-        console.error('Failed to fetch permafail status:', error);
-        return {};
-    }
-}
-
 async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
     const jobKey = `${owner}/${repo}/${pr}/${job.name}`;
 
-    if (consecutiveFailures <= 2) {
+    if (consecutiveFailures <= MAX_AUTO_RETEST_FAILURES) {
         // 1st or 2nd failure: would auto-retest immediately (future enhancement)
         return;
     }
 
-    if (consecutiveFailures === 3) {
+    if (consecutiveFailures === PERMAFAIL_CHECK_THRESHOLD) {
         // 3rd failure: check for permafail
         const jobUrls = job.urls || [];
 
-        if (jobUrls.length < 3) {
+        if (jobUrls.length < PERMAFAIL_CHECK_THRESHOLD) {
             // Not enough data, would allow retest (future enhancement)
             return;
         }
@@ -563,9 +556,14 @@ async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
                     pr: `${owner}/${repo}#${pr}`,
                     repo: `${owner}/${repo}`,
                     job_name: job.name,
-                    job_urls: jobUrls.slice(0, 3)
+                    job_urls: jobUrls.slice(0, PERMAFAIL_CHECK_THRESHOLD)
                 })
             });
+
+            if (!response.ok) {
+                console.error('Permafail analysis request failed:', response.status, response.statusText);
+                return; // Fail open: allow retest
+            }
 
             const result = await response.json();
 
@@ -668,13 +666,19 @@ async function checkForPermafail(owner, repo, pr, jobName) {
     try {
         // Fetch current job data
         const response = await fetch(`/api/pr/${owner}/${repo}/${pr}`);
+
+        if (!response.ok) {
+            console.error('Failed to fetch PR job data:', response.status, response.statusText);
+            return;
+        }
+
         const data = await response.json();
 
         // Check both e2e and payload jobs
         const allFailedJobs = [...(data.e2e?.failed || []), ...(data.payload?.failed || [])];
         const job = allFailedJobs.find(j => j.name === jobName);
 
-        if (job && job.consecutive >= 3) {
+        if (job && job.consecutive >= PERMAFAIL_CHECK_THRESHOLD) {
             // Job is still failed with 3+ consecutive failures - check for permafail
             await handleFailedJob(job, job.consecutive, owner, repo, pr);
         }
