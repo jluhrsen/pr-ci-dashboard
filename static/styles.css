@@ -282,3 +282,9 @@ h1 {
 .context-menu-item:hover {
     background: #f5f5f5;
 }
+
+/* Check Permafail button */
+.check-permafail-btn {
+    font-size: 0.6rem;
+    white-space: nowrap;
+}

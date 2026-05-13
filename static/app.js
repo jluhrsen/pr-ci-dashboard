@@ -89,6 +89,14 @@ async function init() {
     // Context menu event listeners
     document.getElementById('clearPermafailItem').addEventListener('click', handleClearPermafail);
     document.addEventListener('click', hideContextMenu);
+
+    // Check for Permafail button event delegation
+    document.addEventListener('click', async (e) => {
+        if (e.target.classList.contains('check-permafail-btn')) {
+            const jobElement = e.target.closest('.job-item');
+            await manualPermafailCheck(jobElement, e.target);
+        }
+    });
 }
 
 async function checkAuth() {
@@ -434,18 +442,26 @@ function renderJobItems(list, failedJobs, owner, repo, number, jobType) {
 
         const retestBtn = createRetestButton(job, owner, repo, number, jobType);
         const analyzeBtn = createAnalyzeButton();
+        const checkPermafailBtn = createCheckPermafailButton(job, owner, repo, number);
 
         if (!retestBtn.disabled) activeRetestCount++;
 
         jobActions.appendChild(retestBtn);
         jobActions.appendChild(analyzeBtn);
+        jobActions.appendChild(checkPermafailBtn);
         jobItem.appendChild(jobActions);
         jobItem.appendChild(jobName);
 
-        // Store job URL and attach context menu events
+        // Store job URL and job data for permafail checking
         if (job.urls && job.urls.length > 0) {
             jobItem.dataset.jobUrl = job.urls[0];
         }
+        jobItem.dataset.jobName = job.name;
+        jobItem.dataset.jobUrls = JSON.stringify(job.urls || []);
+        jobItem.dataset.owner = owner;
+        jobItem.dataset.repo = repo;
+        jobItem.dataset.pr = number;
+
         const jobKey = `${owner}/${repo}/${number}/${job.name}`;
         attachJobCardEvents(jobItem, jobKey);
 
@@ -510,6 +526,24 @@ function createRetestButton(job, owner, repo, number, jobType) {
 function createAnalyzeButton() {
     const btn = createElement('button', 'btn btn-secondary', 'Analyze');
     btn.disabled = true;
+    return btn;
+}
+
+function createCheckPermafailButton(job, owner, repo, number) {
+    const btn = createElement('button', 'btn btn-secondary check-permafail-btn', 'Check for Permafail');
+
+    // Show button only if 2+ consecutive failures
+    const consecutiveFailures = job.urls?.length || job.consecutive || 0;
+    if (consecutiveFailures < 2) {
+        btn.style.display = 'none';
+    }
+
+    // Check if job already has permafail status
+    const jobKey = `${owner}/${repo}/${number}/${job.name}`;
+    if (permafailJobs.has(jobKey)) {
+        btn.style.display = 'none';
+    }
+
     return btn;
 }
 
@@ -582,6 +616,83 @@ async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
         }
 
         // Not a permafail, continue retesting (future enhancement)
+    }
+}
+
+async function manualPermafailCheck(jobElement, buttonElement) {
+    // Disable button and show loading state
+    buttonElement.disabled = true;
+    buttonElement.textContent = 'Analyzing...';
+
+    // Extract job data from element
+    const jobName = jobElement.dataset.jobName;
+    const jobUrls = JSON.parse(jobElement.dataset.jobUrls || '[]');
+    const owner = jobElement.dataset.owner;
+    const repo = jobElement.dataset.repo;
+    const pr = jobElement.dataset.pr;
+
+    if (!jobName || !owner || !repo || !pr) {
+        console.error('Missing job data on element:', jobElement);
+        buttonElement.textContent = 'Error: Missing data';
+        setTimeout(() => {
+            buttonElement.textContent = 'Check for Permafail';
+            buttonElement.disabled = false;
+        }, 2000);
+        return;
+    }
+
+    if (jobUrls.length < 2) {
+        buttonElement.textContent = 'Not enough failures';
+        setTimeout(() => {
+            buttonElement.textContent = 'Check for Permafail';
+            buttonElement.disabled = false;
+        }, 2000);
+        return;
+    }
+
+    const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
+
+    try {
+        const response = await fetch('/api/jobs/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pr: `${owner}/${repo}#${pr}`,
+                repo: `${owner}/${repo}`,
+                job_name: jobName,
+                job_urls: jobUrls
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Analysis request failed: ${response.status} ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        if (result.permafail) {
+            // Mark as permafail
+            renderPermafailIcon(jobElement, result.reason);
+            permafailJobs.set(jobKey, result);
+            buttonElement.style.display = 'none';
+            showToast('Permafail detected: ' + result.reason, 'error');
+        } else {
+            // No permafail detected
+            buttonElement.textContent = 'No permafail detected';
+            setTimeout(() => {
+                buttonElement.textContent = 'Check for Permafail';
+                buttonElement.disabled = false;
+            }, 2000);
+            showToast('No permafail detected - safe to retest', 'success');
+        }
+    } catch (error) {
+        console.error('Manual permafail check failed:', error);
+        buttonElement.textContent = 'Check Failed';
+        setTimeout(() => {
+            buttonElement.textContent = 'Check for Permafail';
+            buttonElement.disabled = false;
+        }, 2000);
+        showToast('Permafail check failed: ' + error.message, 'error');
     }
 }
 
