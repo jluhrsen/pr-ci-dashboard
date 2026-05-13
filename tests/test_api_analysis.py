@@ -91,13 +91,13 @@ def test_analyze_endpoint_missing_fields(client):
 
 def test_analyze_endpoint_wrong_number_of_urls(client):
     """Test endpoint rejects wrong number of job URLs"""
+    # Test with only 1 URL (too few)
     request_data = {
         "pr": "openshift/ovn-kubernetes#1234",
         "repo": "openshift/ovn-kubernetes",
         "job_name": "e2e-aws-ovn",
         "job_urls": [
-            "https://prow.ci.openshift.org/view/1",
-            "https://prow.ci.openshift.org/view/2"
+            "https://prow.ci.openshift.org/view/1"
         ]
     }
     response = client.post(
@@ -108,7 +108,7 @@ def test_analyze_endpoint_wrong_number_of_urls(client):
     assert response.status_code == 400
     data = json.loads(response.data)
     assert "error" in data
-    assert "Exactly 3 job URLs required" in data["error"]
+    assert "2 or 3 job URLs required" in data["error"]
 
 def test_analyze_endpoint_invalid_pr_format(client):
     """Test endpoint rejects invalid PR format"""

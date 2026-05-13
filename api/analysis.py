@@ -38,8 +38,9 @@ def analyze_job():
             if field not in data:
                 return jsonify({"error": f"Missing field: {field}"}), 400
 
-        if len(data["job_urls"]) != 3:
-            return jsonify({"error": "Exactly 3 job URLs required"}), 400
+        # Allow 2 or 3 URLs (3 is optimal for detection, 2 for early manual checks)
+        if len(data["job_urls"]) < 2 or len(data["job_urls"]) > 3:
+            return jsonify({"error": "2 or 3 job URLs required"}), 400
 
         # Parse PR info
         pr_parts = data["pr"].split("#")
