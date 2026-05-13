@@ -666,7 +666,7 @@ async function manualPermafailCheck(jobElement, buttonElement) {
                 pr: `${owner}/${repo}#${pr}`,
                 repo: `${owner}/${repo}`,
                 job_name: jobName,
-                job_urls: jobUrls
+                job_urls: jobUrls.slice(0, 3)  // Only send first 3 URLs
             })
         });
 
