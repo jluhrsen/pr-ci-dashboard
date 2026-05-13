@@ -13,6 +13,9 @@ const MAX_POLL_TIME = 5 * 60 * 1000; // 5 minutes
 // Permafail tracking
 const permafailJobs = new Map(); // jobKey -> {permafail: bool, reason: str, override: bool}
 
+// Context menu tracking
+let contextMenuTarget = null;
+
 // DOM element cache
 const DOM = {
     searchInput: null,
@@ -78,6 +81,10 @@ async function init() {
         currentPage++;
         executeSearch(DOM.searchInput.value, true);
     });
+
+    // Context menu event listeners
+    document.getElementById('clearPermafailItem').addEventListener('click', handleClearPermafail);
+    document.addEventListener('click', hideContextMenu);
 }
 
 async function checkAuth() {
@@ -166,6 +173,74 @@ function clearPermafailUI(jobElement, jobKey) {
 
     // Update state
     permafailJobs.delete(jobKey);
+}
+
+// ========================================
+// Context Menu
+// ========================================
+function showContextMenu(event, jobElement, jobKey) {
+    event.preventDefault();
+
+    const menu = document.getElementById('contextMenu');
+
+    // Only show menu if job has permafail
+    if (!permafailJobs.has(jobKey)) {
+        return;
+    }
+
+    contextMenuTarget = { jobElement, jobKey };
+
+    // Position menu at click location
+    menu.style.left = event.pageX + 'px';
+    menu.style.top = event.pageY + 'px';
+    menu.style.display = 'block';
+}
+
+function hideContextMenu() {
+    const menu = document.getElementById('contextMenu');
+    menu.style.display = 'none';
+    contextMenuTarget = null;
+}
+
+async function handleClearPermafail() {
+    if (!contextMenuTarget) return;
+
+    const { jobElement, jobKey } = contextMenuTarget;
+    const jobUrl = jobElement.dataset.jobUrl;
+
+    if (!jobUrl) {
+        console.error('No job URL found on element');
+        hideContextMenu();
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/jobs/override', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_url: jobUrl })
+        });
+
+        if (response.ok) {
+            clearPermafailUI(jobElement, jobKey);
+            showToast('Permafail cleared successfully', 'success');
+        } else {
+            const error = await response.json();
+            showToast('Failed to clear permafail: ' + (error.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        console.error('Failed to clear permafail:', error);
+        showToast('Failed to clear permafail: ' + error.message, 'error');
+    }
+
+    hideContextMenu();
+}
+
+function attachJobCardEvents(jobElement, jobKey) {
+    // Add right-click handler
+    jobElement.addEventListener('contextmenu', (e) => {
+        showContextMenu(e, jobElement, jobKey);
+    });
 }
 
 // ========================================
@@ -362,6 +437,14 @@ function renderJobItems(list, failedJobs, owner, repo, number, jobType) {
         jobActions.appendChild(analyzeBtn);
         jobItem.appendChild(jobActions);
         jobItem.appendChild(jobName);
+
+        // Store job URL and attach context menu events
+        if (job.urls && job.urls.length > 0) {
+            jobItem.dataset.jobUrl = job.urls[0];
+        }
+        const jobKey = `${owner}/${repo}/${number}/${job.name}`;
+        attachJobCardEvents(jobItem, jobKey);
+
         list.appendChild(jobItem);
     });
 
