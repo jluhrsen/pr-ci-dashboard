@@ -58,15 +58,7 @@ def analyze_job():
             data["pr"]
         )
 
-        # Check if AI analyzer returned an error
-        if "error" in result:
-            return jsonify({
-                "permafail": False,
-                "reason": result["error"],
-                "test_names": []
-            })
-
-        # Cache results for each URL
+        # Cache results for each URL (for both success and error cases)
         db_path = current_app.config.get('DB_PATH')
         for i, url in enumerate(data["job_urls"]):
             signature = result.get("signatures", [])[i] if i < len(result.get("signatures", [])) else {}
@@ -79,6 +71,14 @@ def analyze_job():
                 permafail_result=result,
                 db_path=db_path
             )
+
+        # Check if AI analyzer returned an error
+        if "error" in result:
+            return jsonify({
+                "permafail": False,
+                "reason": "Analysis unavailable, manual check needed",
+                "error": result["error"]
+            })
 
         return jsonify({
             "permafail": result.get("permafail", False),

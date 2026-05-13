@@ -601,6 +601,12 @@ async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
 
             const result = await response.json();
 
+            // Check for analysis error
+            if (result.error) {
+                showToast(`Analysis failed: ${result.reason}`, 'error');
+                return; // Fail open - don't set permafail, leave retest enabled
+            }
+
             if (result.permafail) {
                 // Mark as permafail, disable retest
                 const jobElement = document.querySelector(`[data-job-url="${jobUrls[0]}"]`);
@@ -669,6 +675,17 @@ async function manualPermafailCheck(jobElement, buttonElement) {
         }
 
         const result = await response.json();
+
+        // Check for analysis error
+        if (result.error) {
+            showToast(`Analysis failed: ${result.reason}`, 'error');
+            buttonElement.textContent = 'Analysis failed';
+            setTimeout(() => {
+                buttonElement.textContent = 'Check for Permafail';
+                buttonElement.disabled = false;
+            }, 2000);
+            return; // Fail open - don't set permafail
+        }
 
         if (result.permafail) {
             // Mark as permafail
