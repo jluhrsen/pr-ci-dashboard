@@ -12,10 +12,8 @@ def analyze_permafail(job_urls, job_name, pr_info):
         pr_info: PR identifier (e.g., "openshift/ovn-kubernetes#1234")
 
     Returns:
-        dict: Analysis result with permafail verdict and signatures
-
-    Raises:
-        RuntimeError: If skill execution fails or times out
+        dict: Analysis result with permafail verdict and signatures.
+              On error, returns dict with permafail=False, error message, and empty signatures list.
     """
     urls_json = json.dumps(job_urls)
 

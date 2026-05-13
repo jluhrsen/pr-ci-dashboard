@@ -1,5 +1,6 @@
 import pytest
 import json
+import subprocess
 from unittest.mock import patch, MagicMock
 from utils.ai_analyzer import analyze_permafail
 
@@ -42,3 +43,68 @@ def test_analyze_permafail_success():
         assert result["reason"] == "TestNetworkPolicy failed in all 3 runs"
         assert len(result["signatures"]) == 3
         assert result["common_tests"] == ["TestNetworkPolicy"]
+
+
+def test_analyze_permafail_timeout():
+    """Test that analyze_permafail handles timeout gracefully"""
+    job_urls = ["url1", "url2", "url3"]
+    job_name = "e2e-aws-ovn"
+    pr_info = "openshift/ovn-kubernetes#1234"
+
+    with patch('subprocess.run', side_effect=subprocess.TimeoutExpired(cmd='test', timeout=300)):
+        result = analyze_permafail(job_urls, job_name, pr_info)
+
+        assert result["permafail"] is False
+        assert "timed out" in result["error"]
+        assert result["signatures"] == []
+
+
+def test_analyze_permafail_nonzero_exit():
+    """Test that analyze_permafail handles non-zero exit code"""
+    job_urls = ["url1", "url2", "url3"]
+    job_name = "e2e-aws-ovn"
+    pr_info = "openshift/ovn-kubernetes#1234"
+
+    mock_result = MagicMock()
+    mock_result.returncode = 1
+    mock_result.stderr = "Skill execution error"
+
+    with patch('subprocess.run', return_value=mock_result):
+        result = analyze_permafail(job_urls, job_name, pr_info)
+
+        assert result["permafail"] is False
+        assert "Skill execution failed" in result["error"]
+        assert "Skill execution error" in result["error"]
+        assert result["signatures"] == []
+
+
+def test_analyze_permafail_invalid_json():
+    """Test that analyze_permafail handles malformed JSON output"""
+    job_urls = ["url1", "url2", "url3"]
+    job_name = "e2e-aws-ovn"
+    pr_info = "openshift/ovn-kubernetes#1234"
+
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "not valid json"
+
+    with patch('subprocess.run', return_value=mock_result):
+        result = analyze_permafail(job_urls, job_name, pr_info)
+
+        assert result["permafail"] is False
+        assert "Failed to parse skill output" in result["error"]
+        assert result["signatures"] == []
+
+
+def test_analyze_permafail_unexpected_error():
+    """Test that analyze_permafail handles unexpected exceptions"""
+    job_urls = ["url1", "url2", "url3"]
+    job_name = "e2e-aws-ovn"
+    pr_info = "openshift/ovn-kubernetes#1234"
+
+    with patch('subprocess.run', side_effect=Exception("Unexpected error occurred")):
+        result = analyze_permafail(job_urls, job_name, pr_info)
+
+        assert result["permafail"] is False
+        assert "Unexpected error" in result["error"]
+        assert result["signatures"] == []
