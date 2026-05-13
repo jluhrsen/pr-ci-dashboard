@@ -590,7 +590,7 @@ async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
                     pr: `${owner}/${repo}#${pr}`,
                     repo: `${owner}/${repo}`,
                     job_name: job.name,
-                    job_urls: jobUrls.slice(0, PERMAFAIL_CHECK_THRESHOLD)
+                    job_urls: jobUrls.slice(0, 10)  // Send up to 10 URLs for pattern detection
                 })
             });
 
@@ -666,7 +666,7 @@ async function manualPermafailCheck(jobElement, buttonElement) {
                 pr: `${owner}/${repo}#${pr}`,
                 repo: `${owner}/${repo}`,
                 job_name: jobName,
-                job_urls: jobUrls.slice(0, 3)  // Only send first 3 URLs
+                job_urls: jobUrls.slice(0, 10)  // Send up to 10 URLs for pattern detection
             })
         });
 

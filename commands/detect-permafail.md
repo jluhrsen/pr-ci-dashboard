@@ -7,17 +7,20 @@ description: Analyze consecutive job failures to determine if they represent a p
 
 ## When to Use This Skill
 
-Use this skill when you have 3 consecutive failures of the same job and need to determine if the failures represent a systematic/permanent failure (permafail) versus a flaky failure. This is critical for CI/CD pipeline analysis to distinguish between:
+Use this skill when you have 2-10 consecutive failures of the same job and need to determine if the failures represent a systematic/permanent failure (permafail) versus a flaky failure. This is critical for CI/CD pipeline analysis to distinguish between:
 
-- **Permafail**: A systematic failure affecting the same test(s) or infrastructure issue across all 3 runs
-- **Flaky**: Non-deterministic failures with varying root causes across runs
+- **Permafail**: A systematic failure affecting the same test(s) or infrastructure issue, detected using these patterns:
+  - 3/3: All 3 most recent runs have the same failure (100% match)
+  - 4/5: At least 4 of the last 5 runs have the same failure (80% match)
+  - 7/10: At least 7 of the last 10 runs have the same failure (70% match)
+- **Flaky**: Non-deterministic failures with varying root causes, or failures that don't meet the permafail thresholds
 
 ## Prerequisites
 
 - Access to the `ci-prow-navigation` skill for analyzing Prow job logs
 - Access to the `Skill` tool for spawning parallel subagents to fetch job details concurrently
-- 3 URLs pointing to consecutive job failures (from Prow/OpenShift CI)
-- Job name context to verify consistency across the 3 failures
+- 2-10 URLs pointing to consecutive job failures (from Prow/OpenShift CI, ordered newest to oldest)
+- Job name context to verify consistency across all failures
 - PR information to provide context for analysis
 
 ## Implementation Steps
@@ -25,32 +28,34 @@ Use this skill when you have 3 consecutive failures of the same job and need to 
 ### Step 1: Validate Inputs
 
 Verify that all required inputs are present and properly formatted:
-- `failure_urls`: Array of exactly 3 job URLs (must be consecutive runs)
+- `failure_urls`: Array of 2-10 job URLs (must be consecutive runs, ordered newest to oldest)
 - `job_name`: String identifier of the job being analyzed
 - `pr_info`: Object containing PR number and repository context
 - Each URL must be a valid Prow job URL format
 
 Reject requests if:
-- URLs count is not exactly 3
-- URLs are not in sequential order (timestamp or build number validation)
+- URLs count is less than 2 or more than 10
 - Job names don't match across all URLs
 - PR context is missing
 
+Note: URL ordering (newest first) is assumed but not validated - the frontend provides them in this order.
+
 ### Step 2: Spawn Parallel Subagents Using Skill Tool
 
-Create 3 parallel tasks to analyze each failure concurrently using the `Skill` tool:
+Create N parallel tasks (where N = number of URLs provided, 2-10) to analyze each failure concurrently using the `Skill` tool:
 
 ```
 Task 1: Analyze failure_urls[0] with ci-prow-navigation
 Task 2: Analyze failure_urls[1] with ci-prow-navigation
-Task 3: Analyze failure_urls[2] with ci-prow-navigation
+...
+Task N: Analyze failure_urls[N-1] with ci-prow-navigation
 ```
 
 Each subagent task should:
 - Invoke the `ci-prow-navigation` skill
 - Pass the job URL and job name as parameters
 - Be independent and non-blocking
-- Timeout after 60 seconds per subagent (5 minutes total for all 3 in parallel)
+- Timeout after 60 seconds per subagent (5 minutes total for all N in parallel)
 
 ### Step 3: Invoke ci-prow-Navigation Skill
 
@@ -105,23 +110,34 @@ Extract and normalize error messages:
 
 ### Step 5: Compare Signatures for Permafail Pattern
 
-Apply permafail detection logic based on failure types:
+Apply permafail detection logic based on the number of URLs and failure patterns:
 
-**Pattern 1: All 3 are test_failure**
-- Extract all unique test names from the 3 signatures
-- Calculate intersection: tests that appear in ALL 3 failures
-- If intersection has ≥1 test name: **PERMAFAIL = TRUE**
-- If intersection is empty: **PERMAFAIL = FALSE** (different tests failing)
+**Detection Thresholds:**
+- If N=2-3 URLs: Check if all N have the same failure (100% match required)
+- If N=4-5 URLs: Check if ≥4 have the same failure (80% match required)
+- If N=6-10 URLs: Check if ≥7 have the same failure (70% match required)
 
-**Pattern 2: All 3 are infra_failure**
-- Compare error_hash values from all 3 signatures
-- Calculate similarity of error messages (Levenshtein distance or simple substring matching)
-- If ≥2 error messages match exactly OR >70% character similarity: **PERMAFAIL = TRUE**
-- Otherwise: **PERMAFAIL = FALSE**
+**For Test Failures:**
+1. Extract all test names from each signature
+2. For each unique test name, count how many signatures contain it
+3. If ANY test name appears in enough signatures to meet the threshold above: **PERMAFAIL = TRUE**
+   - Report which test(s) met the threshold and their occurrence count
+4. If no test meets the threshold: **PERMAFAIL = FALSE**
 
-**Pattern 3: Mixed failure types**
-- Any combination of test_failure and infra_failure
-- **PERMAFAIL = FALSE** by definition (not a consistent pattern)
+Example: With 8 URLs, if "TestNetworkPolicy" appears in 7 of them → PERMAFAIL (meets 7/10 threshold)
+
+**For Infrastructure Failures:**
+1. Extract error messages from each signature
+2. Group similar errors (exact match or >70% character similarity)
+3. If ANY error group has enough occurrences to meet the threshold above: **PERMAFAIL = TRUE**
+   - Report the error message and occurrence count
+4. If no error group meets the threshold: **PERMAFAIL = FALSE**
+
+**For Mixed Failure Types:**
+1. Group signatures by type (test_failure vs infra_failure)
+2. Apply the same logic separately to each group
+3. If either group meets the threshold: **PERMAFAIL = TRUE** (report the dominant pattern)
+4. Otherwise: **PERMAFAIL = FALSE**
 
 ### Step 6: Generate Verdict and Return JSON
 

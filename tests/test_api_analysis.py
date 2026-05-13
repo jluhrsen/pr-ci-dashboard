@@ -108,7 +108,19 @@ def test_analyze_endpoint_wrong_number_of_urls(client):
     assert response.status_code == 400
     data = json.loads(response.data)
     assert "error" in data
-    assert "2 or 3 job URLs required" in data["error"]
+    assert "2 to 10 job URLs required" in data["error"]
+
+    # Test with 11 URLs (too many)
+    request_data["job_urls"] = [f"https://prow.ci.openshift.org/view/{i}" for i in range(11)]
+    response = client.post(
+        '/api/jobs/analyze',
+        data=json.dumps(request_data),
+        content_type='application/json'
+    )
+    assert response.status_code == 400
+    data = json.loads(response.data)
+    assert "error" in data
+    assert "2 to 10 job URLs required" in data["error"]
 
 def test_analyze_endpoint_invalid_pr_format(client):
     """Test endpoint rejects invalid PR format"""
