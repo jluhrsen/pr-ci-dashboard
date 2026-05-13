@@ -1,6 +1,6 @@
 # api/analysis.py
 from flask import Blueprint, request, jsonify, current_app
-from utils.db import store_analysis, get_permafail_status
+from utils.db import store_analysis, get_permafail_status, clear_override
 from utils.ai_analyzer import analyze_permafail
 
 analysis_bp = Blueprint('analysis', __name__)
@@ -87,3 +87,50 @@ def analyze_job():
 
     except Exception as e:
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/jobs/override', methods=['POST'])
+def override_permafail():
+    """
+    Clear permafail flag for a job
+
+    Request: {"job_url": "https://..."}
+    Response: {"success": bool}
+    """
+    data = request.get_json()
+
+    if not data or 'job_url' not in data:
+        return jsonify({"error": "Missing job_url"}), 400
+
+    db_path = current_app.config.get('DB_PATH')
+    clear_override(data['job_url'], db_path=db_path)
+
+    return jsonify({"success": True})
+
+
+@analysis_bp.route('/api/jobs/status', methods=['GET'])
+def get_job_status():
+    """
+    Get permafail status for multiple jobs
+
+    Query: ?job_urls=["url1", "url2", ...]
+    Response: {
+        "url1": {"permafail": bool, "reason": str, "override": bool},
+        ...
+    }
+    """
+    import json
+
+    job_urls_param = request.args.get('job_urls')
+    if not job_urls_param:
+        return jsonify({"error": "Missing job_urls parameter"}), 400
+
+    try:
+        job_urls = json.loads(job_urls_param)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid JSON in job_urls"}), 400
+
+    db_path = current_app.config.get('DB_PATH')
+    status = get_permafail_status(job_urls, db_path=db_path)
+
+    return jsonify(status)

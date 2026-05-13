@@ -176,3 +176,70 @@ def test_analyze_endpoint_database_failure(client, tmp_path):
     data = json.loads(response.data)
     assert "error" in data
     assert "Internal server error" in data["error"]
+
+def test_override_endpoint_clears_permafail(client, tmp_path):
+    """Test POST /api/jobs/override clears permafail flag"""
+    from utils.db import store_analysis
+
+    # Store a permafail result
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/12345",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={"type": "test_failure", "tests": ["TestA"]},
+        permafail_result={"permafail": True, "reason": "Test failed"},
+        db_path=str(tmp_path / "test.db")
+    )
+
+    response = client.post(
+        '/api/jobs/override',
+        data=json.dumps({"job_url": "https://prow.ci.openshift.org/view/12345"}),
+        content_type='application/json'
+    )
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data["success"] is True
+
+
+def test_status_endpoint_returns_batch_status(client, tmp_path):
+    """Test GET /api/jobs/status returns permafail status for multiple URLs"""
+    from utils.db import store_analysis
+
+    # Store two results
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/1",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={"type": "test_failure", "tests": ["TestA"]},
+        permafail_result={"permafail": True, "reason": "TestA failed"},
+        db_path=str(tmp_path / "test.db")
+    )
+
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/2",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-gcp-ovn",
+        signature={"type": "test_failure", "tests": ["TestB"]},
+        permafail_result={"permafail": False, "reason": "Mixed"},
+        db_path=str(tmp_path / "test.db")
+    )
+
+    response = client.get(
+        '/api/jobs/status?job_urls=' + json.dumps([
+            "https://prow.ci.openshift.org/view/1",
+            "https://prow.ci.openshift.org/view/2"
+        ])
+    )
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+
+    assert "https://prow.ci.openshift.org/view/1" in data
+    assert data["https://prow.ci.openshift.org/view/1"]["permafail"] is True
+
+    assert "https://prow.ci.openshift.org/view/2" in data
+    assert data["https://prow.ci.openshift.org/view/2"]["permafail"] is False
