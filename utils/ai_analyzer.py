@@ -56,10 +56,15 @@ PR: {pr_info}
 
 Return ONLY the final JSON result with no additional explanation."""
 
+    # Send initial status
+    yield json.dumps({"type": "output", "line": "==> Starting Claude CLI analysis..."})
+    yield json.dumps({"type": "output", "line": f"==> Analyzing {len(job_urls)} job URLs for permafail patterns"})
+    yield json.dumps({"type": "output", "line": ""})
+
     cmd = [
         'claude',
-        '--allowedTools', 'WebFetch,Bash',
-        '--print'
+        '--allowedTools', 'WebFetch,Bash'
+        # Removed --print to see interactive output
     ]
 
     try:
@@ -68,21 +73,66 @@ Return ONLY the final JSON result with no additional explanation."""
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
-            bufsize=1,  # Line buffered
-            cwd=project_root
+            bufsize=0,  # Unbuffered
+            cwd=project_root,
+            env={**os.environ, 'PYTHONUNBUFFERED': '1'}
         )
 
         # Write prompt to stdin and close it
         process.stdin.write(prompt)
+        process.stdin.flush()
         process.stdin.close()
 
-        # Stream output line by line
+        # Stream output line by line from both stdout and stderr
+        import threading
         output_lines = []
-        for line in process.stdout:
-            output_lines.append(line)
-            yield json.dumps({"type": "output", "line": line.rstrip('\n')})
+
+        def read_stream(stream, prefix=""):
+            """Read from stream and yield lines"""
+            for line in iter(stream.readline, ''):
+                if line:
+                    output_lines.append(line)
+
+        # Start threads to read both streams
+        stdout_thread = threading.Thread(target=read_stream, args=(process.stdout, "OUT: "))
+        stderr_thread = threading.Thread(target=read_stream, args=(process.stderr, "ERR: "))
+        stdout_thread.daemon = True
+        stderr_thread.daemon = True
+        stdout_thread.start()
+        stderr_thread.start()
+
+        # Wait for process with periodic output
+        start_time = __import__('time').time()
+        last_output_time = start_time
+        last_line_count = 0
+
+        while process.poll() is None:
+            __import__('time').sleep(0.5)
+
+            # Yield any new lines that were captured
+            if len(output_lines) > last_line_count:
+                for line in output_lines[last_line_count:]:
+                    yield json.dumps({"type": "output", "line": line.rstrip('\n')})
+                    last_output_time = __import__('time').time()
+                last_line_count = len(output_lines)
+
+            # Show periodic heartbeat if no output for a while
+            elapsed = __import__('time').time() - last_output_time
+            if elapsed > 10:
+                total_elapsed = int(__import__('time').time() - start_time)
+                yield json.dumps({"type": "output", "line": f"[Still analyzing... {total_elapsed}s elapsed]"})
+                last_output_time = __import__('time').time()
+
+        # Wait for threads to finish reading
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+
+        # Yield any remaining lines
+        if len(output_lines) > last_line_count:
+            for line in output_lines[last_line_count:]:
+                yield json.dumps({"type": "output", "line": line.rstrip('\n')})
 
         # Wait for process to complete
         return_code = process.wait(timeout=300)
