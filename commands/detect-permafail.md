@@ -138,25 +138,38 @@ Example: With 8 URLs, if "TestNetworkPolicy" appears in 7 of them → PERMAFAIL 
 
 **For Mixed Failure Types:**
 1. Group signatures by type (test_failure vs infra_failure)
-2. Apply the same threshold logic separately to each group:
-   - **Test failures**: Count how many test_failure signatures exist. If this count meets the threshold for N total signatures, check if they have common failing tests.
-   - **Infra failures**: Count how many infra_failure signatures exist. If this count meets the threshold for N total signatures, check if they have common errors.
-3. If either group alone meets the permafail pattern: **PERMAFAIL = TRUE**
+2. Apply threshold logic to each group **based on the group size**:
+   - **Test failures**: Count how many test_failure signatures exist. Apply the threshold based on THIS count (not total URLs).
+     - Example: 4 test failures → use 4/5 threshold (80%) → need 4 matching
+     - Example: 1 test failure → cannot establish pattern (need minimum 2 for any threshold)
+   - **Infra failures**: Count how many infra_failure signatures exist. Apply the threshold based on THIS count.
+3. **Minimum runs requirement**: Need at least 2 runs of the same type to establish a permafail pattern. A single failure (even with 100% match rate within its group) is insufficient evidence.
+4. If either group meets the threshold AND has minimum 2 runs: **PERMAFAIL = TRUE**
    - Report the dominant pattern (the one that triggered permafail)
-   - Explain which runs contributed to the permafail and which were ignored (e.g., "4 out of 4 runs that reached e2e tests failed on TestNetworkPolicy. 3 other runs failed during cluster setup and are not relevant to this analysis.")
-4. If neither group meets the threshold: **PERMAFAIL = FALSE**
+   - Explain which runs contributed and which were ignored (e.g., "4 out of 4 runs that reached e2e tests failed on TestNetworkPolicy. 3 other runs failed during cluster setup and are not relevant to this analysis.")
+5. If neither group meets criteria: **PERMAFAIL = FALSE**
 
-**Example Scenario:**
+**Example Scenario 1: PERMAFAIL (4 test, 3 infra):**
 - 7 total runs provided
 - 3 runs: infra_failure (cluster creation failed)
 - 4 runs: test_failure (all failing on TestNetworkPolicy)
 
 **Analysis:**
-- For 7 URLs, threshold is 7/10 (70%) = need 5 matches
-- Test failures: 4 runs (doesn't meet 7/10 threshold for all 7)
-- BUT: Consider test failures independently: 4/4 (100%) have the same test = PERMAFAIL
-- Verdict: **PERMAFAIL = TRUE**
+- Test failures: 4 runs → use 4/5 threshold (80%) → need 4 matching → have 4/4 (100%) ✓ PERMAFAIL
+- Infra failures: 3 runs → use 3/3 threshold (100%) → different errors → NOT permafail
+- Verdict: **PERMAFAIL = TRUE** (test failure group met criteria)
 - Reason: "All 4 runs that reached e2e tests failed on TestNetworkPolicy (100% match). 3 additional runs failed during infrastructure setup and are not relevant to this test failure pattern."
+
+**Example Scenario 2: NOT PERMAFAIL (1 test, 6 infra):**
+- 7 total runs provided
+- 6 runs: infra_failure (various build/setup issues)
+- 1 run: test_failure (failed on TestNetworkPolicy)
+
+**Analysis:**
+- Test failures: 1 run → INSUFFICIENT (need minimum 2 runs to establish pattern)
+- Infra failures: 6 runs → use 6-10 threshold (70%) → need 5 matching → have varying errors → NOT permafail
+- Verdict: **PERMAFAIL = FALSE**
+- Reason: "Only 1 out of 7 runs reached e2e tests and failed on '[sig-arch] daemonset cni-sysctl-allowlist-ds maxUnavailable requirement'. The other 6 runs failed during infrastructure setup with different issues. A single test failure is insufficient to establish a permafail pattern - we need multiple runs with consistent failures to confirm systematic breakage."
 
 ### Step 6: Generate Verdict and Return JSON
 
