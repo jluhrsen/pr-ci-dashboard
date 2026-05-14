@@ -405,8 +405,8 @@ async function handleForceReanalyze() {
 
     hideContextMenu();
 
-    // Find the "Check for Permafail" button and update its state
-    const checkPermafailBtn = jobElement.querySelector('.check-permafail-btn');
+    // Declare button reference outside try block for access in catch
+    let checkPermafailBtn = null;
 
     try {
         // Delete cached analysis for all URLs
@@ -430,11 +430,14 @@ async function handleForceReanalyze() {
         // Clear permafail UI
         clearPermafailUI(jobElement, jobKey);
 
-        // Update button to show analyzing state
+        // Find and update button to show analyzing state (after clearing UI)
+        checkPermafailBtn = jobElement.querySelector('.check-permafail-btn');
         if (checkPermafailBtn) {
             checkPermafailBtn.disabled = true;
             checkPermafailBtn.textContent = 'Analyzing...';
             checkPermafailBtn.style.display = 'inline-block';
+        } else {
+            console.warn('Check permafail button not found for job:', jobKey);
         }
 
         // Trigger fresh streaming analysis
