@@ -1,7 +1,7 @@
 # api/analysis.py
 import json
 from flask import Blueprint, request, jsonify, current_app
-from utils.db import store_analysis, get_permafail_status, set_override
+from utils.db import store_analysis, get_permafail_status, set_override, delete_cached_analyses
 from utils.ai_analyzer import analyze_permafail
 
 analysis_bp = Blueprint('analysis', __name__)
@@ -115,6 +115,38 @@ def override_permafail():
         set_override(data['job_url'], db_path=db_path)
 
         return jsonify({"success": True})
+
+    except Exception as e:
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/jobs/delete-cache', methods=['POST'])
+def delete_cache():
+    """
+    Delete cached analysis for job URLs and optionally re-analyze
+
+    Request: {
+        "job_urls": ["url1", "url2", ...],
+        "reanalyze": bool (optional, default false)
+    }
+    Response: {"success": bool, "deleted_count": int}
+    """
+    try:
+        data = request.get_json(force=True, silent=False)
+    except Exception:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    if not data or 'job_urls' not in data:
+        return jsonify({"error": "Missing job_urls"}), 400
+
+    try:
+        db_path = current_app.config.get('DB_PATH')
+        deleted_count = delete_cached_analyses(data['job_urls'], db_path=db_path)
+
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count
+        })
 
     except Exception as e:
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500

@@ -198,3 +198,37 @@ def clear_override(job_url, db_path=None):
     finally:
         if conn:
             conn.close()
+
+
+def delete_cached_analyses(job_urls, db_path=None):
+    """
+    Delete cached analysis for multiple job URLs
+
+    Args:
+        job_urls: List of Prow job URLs to delete
+        db_path: Optional database path (defaults to DB_PATH)
+
+    Returns:
+        int: Number of records deleted
+
+    Raises:
+        RuntimeError: If database operation fails
+    """
+    path = db_path or DB_PATH
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+
+        deleted_count = 0
+        for url in job_urls:
+            cursor.execute("DELETE FROM job_analyses WHERE job_url = ?", (url,))
+            deleted_count += cursor.rowcount
+
+        conn.commit()
+        return deleted_count
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to delete cached analyses: {e}")
+    finally:
+        if conn:
+            conn.close()
