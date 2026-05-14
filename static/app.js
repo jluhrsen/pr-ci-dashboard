@@ -237,6 +237,48 @@ function clearPermafailUI(jobElement, jobKey) {
     permafailJobs.delete(jobKey);
 }
 
+async function loadCachedPermafailResults(list, failedJobs) {
+    // Collect all job URLs
+    const jobUrls = [];
+    failedJobs.forEach(job => {
+        if (job.urls && job.urls.length > 0) {
+            jobUrls.push(job.urls[0]);
+        }
+    });
+
+    if (jobUrls.length === 0) return;
+
+    try {
+        // Fetch cached results from database
+        const response = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify(jobUrls))}`);
+        if (!response.ok) {
+            console.error('Failed to load cached permafail results:', response.status);
+            return;
+        }
+
+        const status = await response.json();
+
+        // Apply cached results to UI
+        for (const [url, result] of Object.entries(status)) {
+            if (result.permafail && !result.override) {
+                const jobElement = list.querySelector(`[data-job-url="${url}"]`);
+                if (jobElement) {
+                    const owner = jobElement.dataset.owner;
+                    const repo = jobElement.dataset.repo;
+                    const pr = jobElement.dataset.pr;
+                    const jobName = jobElement.dataset.jobName;
+                    const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
+
+                    renderPermafailIcon(jobElement, result.reason);
+                    permafailJobs.set(jobKey, result);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading cached permafail results:', error);
+    }
+}
+
 // ========================================
 // Context Menu
 // ========================================
@@ -441,7 +483,7 @@ function updateCardWithJobs(cardElement, data, owner, repo, number) {
     renderJobSection(cardElement, `payload-${owner}-${repo}-${number}`, data.payload, owner, repo, number, 'Payload', 'payload');
 }
 
-function renderJobSection(cardElement, sectionId, jobData, owner, repo, number, displayType, jobType) {
+async function renderJobSection(cardElement, sectionId, jobData, owner, repo, number, displayType, jobType) {
     const section = cardElement.querySelector(`#${sectionId}`);
     const header = section.querySelector('.job-section-header');
     const list = section.querySelector('.job-list');
@@ -477,6 +519,9 @@ function renderJobSection(cardElement, sectionId, jobData, owner, repo, number, 
     if (failed.length > 0) {
         const activeRetestCount = renderJobItems(list, failed, owner, repo, number, jobType);
         list.appendChild(createRetestAllButton(owner, repo, number, displayType, jobType, activeRetestCount));
+
+        // Load cached permafail results after rendering
+        await loadCachedPermafailResults(list, failed);
     } else {
         list.appendChild(createElement('div', '', '✅ No failed jobs', { style: 'padding: 0.5rem;' }));
     }
@@ -678,7 +723,7 @@ async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
 async function manualPermafailCheck(jobElement, buttonElement) {
     // Disable button and show loading state
     buttonElement.disabled = true;
-    buttonElement.textContent = 'Analyzing...';
+    buttonElement.textContent = 'Checking...';
 
     // Extract job data from element
     const jobName = jobElement.dataset.jobName;
@@ -709,6 +754,33 @@ async function manualPermafailCheck(jobElement, buttonElement) {
     const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
 
     try {
+        // First check if we already have cached results
+        const statusResponse = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify([jobUrls[0]]))}`);
+        if (statusResponse.ok) {
+            const statusData = await statusResponse.json();
+            const cachedResult = statusData[jobUrls[0]];
+
+            if (cachedResult && cachedResult.permafail && !cachedResult.override) {
+                // We have a cached permafail result - use it
+                renderPermafailIcon(jobElement, cachedResult.reason);
+                permafailJobs.set(jobKey, cachedResult);
+                buttonElement.style.display = 'none';
+                showToast('Using cached permafail result', 'info');
+                return;
+            } else if (cachedResult && !cachedResult.permafail) {
+                // We have a cached "not permafail" result - show it
+                buttonElement.textContent = 'No permafail (cached)';
+                setTimeout(() => {
+                    buttonElement.textContent = 'Check for Permafail';
+                    buttonElement.disabled = false;
+                }, 2000);
+                showToast('No permafail detected (cached result)', 'success');
+                return;
+            }
+        }
+
+        // No cached result, run analysis
+        buttonElement.textContent = 'Analyzing...';
         const response = await fetch('/api/jobs/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
