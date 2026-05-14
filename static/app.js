@@ -287,13 +287,26 @@ function showContextMenu(event, jobElement, jobKey) {
     event.preventDefault();
 
     const menu = document.getElementById('contextMenu');
+    const jobUrls = JSON.parse(jobElement.dataset.jobUrls || '[]');
 
-    // Only show menu if job has permafail
-    if (!permafailJobs.has(jobKey)) {
+    // Only show menu if job has 2+ consecutive failures (analyzable)
+    if (jobUrls.length < 2) {
         return;
     }
 
     contextMenuTarget = { jobElement, jobKey };
+
+    // Show/hide menu items based on permafail status
+    const clearItem = document.getElementById('clearPermafailItem');
+    const reanalyzeItem = document.getElementById('forceReanalyzeItem');
+
+    if (permafailJobs.has(jobKey)) {
+        clearItem.style.display = 'block';
+        reanalyzeItem.style.display = 'block';
+    } else {
+        clearItem.style.display = 'none';
+        reanalyzeItem.style.display = 'block';
+    }
 
     // Position menu at click location
     menu.style.left = event.pageX + 'px';
