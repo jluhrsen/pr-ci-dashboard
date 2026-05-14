@@ -60,13 +60,70 @@ Each subagent task should:
 - Be independent and non-blocking
 - Timeout after 60 seconds per subagent (5 minutes total for all N in parallel)
 
-### Step 3: Invoke ci-prow-Navigation Skill
+### Step 3: Analyze Each Job and Classify Failure Type
 
-Each subagent calls the `ci-prow-navigation` skill with parameters:
-- `job_url`: The specific Prow job URL
-- `job_name`: Name of the job being analyzed
+For each job URL, use ci-prow-navigation techniques to fetch artifacts and classify the failure:
 
-Expected response structure from ci-prow-navigation:
+**3.1: Extract Job ID from URL**
+
+Parse the job ID from the URL pattern:
+`https://prow.ci.openshift.org/view/gs/test-platform-results/logs/<JOB_NAME>/<JOB_ID>`
+
+**3.2: Check prowjob.json for Status**
+
+Fetch `prowjob.json` from the job root:
+```bash
+curl -sS 'https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/<JOB_NAME>/<JOB_ID>/prowjob.json' | jq '{state: .status.state, description: .status.description}'
+```
+
+**3.3: Classify as test_failure vs infra_failure**
+
+Use these heuristics IN ORDER (first match wins):
+
+**INFRA_FAILURE indicators (job never reached e2e tests):**
+1. `prowjob.json` description contains:
+   - "Pod scheduling timeout"
+   - "Build failed"
+   - "Container failed to start"
+   - "setup failed"
+   - "Cluster failed to install"
+   - Any mention of "infra" or "infrastructure"
+
+2. Artifacts directory structure check using WebFetch on `https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/<JOB_NAME>/<JOB_ID>/artifacts/`:
+   - Missing `openshift-e2e-test/` or `e2e-<variant>/` directories → INFRA_FAILURE
+   - Only contains setup/build step directories → INFRA_FAILURE
+
+**TEST_FAILURE indicators (job reached e2e tests and failed):**
+1. Artifacts contain e2e test directories:
+   - `openshift-e2e-test/artifacts/junit/` exists
+   - `e2e-<variant>/` directory exists with test output
+
+2. `prowjob.json` description is "the test step failed" AND artifacts show e2e test execution
+
+3. Build log shows test execution:
+   ```bash
+   curl -sS '<artifacts_url>/openshift-e2e-test/artifacts/e2e-<variant>/build-log.txt' | head -100
+   ```
+   - Contains test names (e.g., "[sig-network]", "TestNetworkPolicy")
+   - Contains "FAIL:" lines with test failures
+   - Contains junit output
+
+**3.4: Extract Failure Details**
+
+**For TEST_FAILURE:**
+- Fetch junit files or build-log.txt from e2e test artifacts
+- Extract failing test names (look for "FAIL:", "[sig-...]", test descriptions)
+- Return array of failing test names
+
+**For INFRA_FAILURE:**
+- Extract error message from prowjob.json description
+- Or fetch build-log.txt from the failing setup step
+- Extract the core error (first 200 chars of relevant error message)
+- Normalize by removing timestamps, build IDs, node names
+
+**3.5: Return Structured Response**
+
+Expected response structure for each job analysis:
 ```json
 {
   "job_url": "string",
@@ -74,12 +131,15 @@ Expected response structure from ci-prow-navigation:
   "status": "FAILURE",
   "failure_type": "test_failure | infra_failure",
   "details": {
-    "tests": ["test1", "test2"],
-    "error_message": "string",
-    "log_snippet": "string"
+    "tests": ["test1", "test2"],           // for test_failure
+    "error_message": "string",             // for infra_failure
+    "log_snippet": "string",
+    "artifacts_checked": ["prowjob.json", "build-log.txt", "junit/"]
   }
 }
 ```
+
+**CRITICAL**: Do NOT rely solely on prowjob.json description. Many jobs say "the test step failed" even when they failed during setup. Always check artifacts directory to confirm e2e test execution occurred.
 
 ### Step 4: Extract Failure Signatures from Each Result
 
