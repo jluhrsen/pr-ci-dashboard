@@ -927,7 +927,9 @@ async function manualPermafailCheck(jobElement, buttonElement) {
                 showToast('Using cached permafail result', 'info');
                 return;
             } else if (cachedResult && !cachedResult.permafail) {
-                // We have a cached "not permafail" result - show it
+                // We have a cached "not permafail" result - show it with info icon
+                permafailJobs.set(jobKey, cachedResult);
+                renderNonPermafailInfo(jobElement, cachedResult.reason);
                 buttonElement.textContent = 'No permafail (cached)';
                 setTimeout(() => {
                     buttonElement.textContent = 'Check for Permafail';
