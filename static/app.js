@@ -368,6 +368,9 @@ async function handleForceReanalyze() {
 
     hideContextMenu();
 
+    // Find the "Check for Permafail" button and update its state
+    const checkPermafailBtn = jobElement.querySelector('.check-permafail-btn');
+
     try {
         // Delete cached analysis for all URLs
         showToast('Deleting cached analysis...', 'info');
@@ -389,6 +392,13 @@ async function handleForceReanalyze() {
 
         // Clear permafail UI
         clearPermafailUI(jobElement, jobKey);
+
+        // Update button to show analyzing state
+        if (checkPermafailBtn) {
+            checkPermafailBtn.disabled = true;
+            checkPermafailBtn.textContent = 'Analyzing...';
+            checkPermafailBtn.style.display = 'inline-block';
+        }
 
         // Trigger fresh analysis
         showToast('Starting fresh analysis...', 'info');
@@ -418,6 +428,13 @@ async function handleForceReanalyze() {
         // Check for analysis error
         if (result.error) {
             showToast(`Fresh analysis failed: ${result.reason}`, 'error');
+            if (checkPermafailBtn) {
+                checkPermafailBtn.textContent = 'Analysis failed';
+                setTimeout(() => {
+                    checkPermafailBtn.textContent = 'Check for Permafail';
+                    checkPermafailBtn.disabled = false;
+                }, 2000);
+            }
             return;
         }
 
@@ -425,13 +442,30 @@ async function handleForceReanalyze() {
             // Mark as permafail with fresh analysis
             renderPermafailIcon(jobElement, result.reason);
             permafailJobs.set(jobKey, result);
+            if (checkPermafailBtn) {
+                checkPermafailBtn.style.display = 'none';
+            }
             showToast('Fresh analysis: Permafail detected - ' + result.reason, 'error');
         } else {
             // No permafail detected
+            if (checkPermafailBtn) {
+                checkPermafailBtn.textContent = 'No permafail detected';
+                setTimeout(() => {
+                    checkPermafailBtn.textContent = 'Check for Permafail';
+                    checkPermafailBtn.disabled = false;
+                }, 2000);
+            }
             showToast('Fresh analysis: No permafail detected - safe to retest', 'success');
         }
     } catch (error) {
         console.error('Force re-analyze failed:', error);
+        if (checkPermafailBtn) {
+            checkPermafailBtn.textContent = 'Check Failed';
+            setTimeout(() => {
+                checkPermafailBtn.textContent = 'Check for Permafail';
+                checkPermafailBtn.disabled = false;
+            }, 2000);
+        }
         showToast('Force re-analyze failed: ' + error.message, 'error');
     }
 }
