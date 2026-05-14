@@ -138,9 +138,25 @@ Example: With 8 URLs, if "TestNetworkPolicy" appears in 7 of them → PERMAFAIL 
 
 **For Mixed Failure Types:**
 1. Group signatures by type (test_failure vs infra_failure)
-2. Apply the same logic separately to each group
-3. If either group meets the threshold: **PERMAFAIL = TRUE** (report the dominant pattern)
-4. Otherwise: **PERMAFAIL = FALSE**
+2. Apply the same threshold logic separately to each group:
+   - **Test failures**: Count how many test_failure signatures exist. If this count meets the threshold for N total signatures, check if they have common failing tests.
+   - **Infra failures**: Count how many infra_failure signatures exist. If this count meets the threshold for N total signatures, check if they have common errors.
+3. If either group alone meets the permafail pattern: **PERMAFAIL = TRUE**
+   - Report the dominant pattern (the one that triggered permafail)
+   - Explain which runs contributed to the permafail and which were ignored (e.g., "4 out of 4 runs that reached e2e tests failed on TestNetworkPolicy. 3 other runs failed during cluster setup and are not relevant to this analysis.")
+4. If neither group meets the threshold: **PERMAFAIL = FALSE**
+
+**Example Scenario:**
+- 7 total runs provided
+- 3 runs: infra_failure (cluster creation failed)
+- 4 runs: test_failure (all failing on TestNetworkPolicy)
+
+**Analysis:**
+- For 7 URLs, threshold is 7/10 (70%) = need 5 matches
+- Test failures: 4 runs (doesn't meet 7/10 threshold for all 7)
+- BUT: Consider test failures independently: 4/4 (100%) have the same test = PERMAFAIL
+- Verdict: **PERMAFAIL = TRUE**
+- Reason: "All 4 runs that reached e2e tests failed on TestNetworkPolicy (100% match). 3 additional runs failed during infrastructure setup and are not relevant to this test failure pattern."
 
 ### Step 6: Generate Verdict and Return JSON
 
@@ -297,19 +313,27 @@ The skill returns a JSON object with this schema:
 
 ### Infrastructure Failure Logic
 
-1. Extract error messages from all 3 failures
+1. Extract error messages from all failures
 2. Compare error_hash values:
-   - If all 3 hashes are identical: **Permafail = TRUE** (confidence: 0.99)
+   - If all hashes are identical: **Permafail = TRUE** (confidence: 0.99)
 3. If hashes differ, perform string similarity check on error messages:
    - Calculate Levenshtein distance or use simple substring matching
-   - If ≥2 errors are >80% similar: **Permafail = TRUE** (confidence: 0.92)
+   - If enough errors are >80% similar to meet the threshold: **Permafail = TRUE** (confidence: 0.92)
    - Otherwise: **Permafail = FALSE** (confidence: 0.70)
 
 ### Mixed Type Logic
 
-Any mixture of test_failure and infra_failure types:
-- **Permafail = FALSE** (confidence: 0.85)
-- Reason: "Mixed failure types indicate non-deterministic/flaky behavior"
+When both test_failure and infra_failure types are present:
+1. **Analyze each group independently** using their respective thresholds
+2. **Test failures**: Check if test_failure signatures have common failing tests
+3. **Infra failures**: Check if infra_failure signatures have common errors
+4. If **either group meets the permafail criteria**: **PERMAFAIL = TRUE**
+   - Report the pattern that triggered permafail (tests or infra)
+   - Explain the breakdown (e.g., "4 of 4 test runs failed on the same test; 3 other runs failed during setup")
+5. If **neither group meets criteria**: **PERMAFAIL = FALSE**
+   - Reason: "No consistent pattern found in test failures or infrastructure failures"
+
+**Key Principle**: Infrastructure failures (cluster setup, resource quota, network issues) are **orthogonal** to test failures. A PR can have a systematic test failure (permafail) even if some runs fail during infrastructure setup. Analyze each type separately and detect permafails in either category.
 
 ## Error Handling
 
@@ -457,53 +481,131 @@ If the ci-prow-navigation response doesn't contain expected failure information:
 }
 ```
 
-### Example 2: Non-Permafail - Mixed Failure Types
+### Example 2: Permafail Despite Mixed Failure Types
 
 **Input:**
 ```json
 {
   "failure_urls": [
-    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234567",
-    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234568",
-    "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234569"
+    "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1111",
+    "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1112",
+    "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1113",
+    "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1114",
+    "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1115",
+    "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1116",
+    "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1117"
   ],
-  "job_name": "pull-ci-openshift-origin-master-e2e-aws",
+  "job_name": "periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node",
   "pr_info": {
-    "pr_number": 54321,
-    "repository": "openshift/origin"
+    "pr_number": 3186,
+    "repository": "openshift/ovn-kubernetes"
   }
 }
 ```
 
 **ci-prow-navigation Results:**
+- Run 1: Infrastructure failure = "Cluster creation timeout" (infra_failure)
+- Run 2: Failed tests = ["[sig-network] Networking should provide connectivity"] (test_failure)
+- Run 3: Infrastructure failure = "AWS quota exceeded" (infra_failure)
+- Run 4: Failed tests = ["[sig-network] Networking should provide connectivity"] (test_failure)
+- Run 5: Failed tests = ["[sig-network] Networking should provide connectivity"] (test_failure)
+- Run 6: Infrastructure failure = "Cluster creation timeout" (infra_failure)
+- Run 7: Failed tests = ["[sig-network] Networking should provide connectivity"] (test_failure)
+
+**Analysis:**
+- 7 total runs: 3 infra_failures, 4 test_failures
+- Test failures: 4/4 (100%) have identical failing test
+- Infra failures: 3 runs, but different errors (not a permafail pattern in infra)
+- Verdict: **PERMAFAIL = TRUE** based on test failure group
+
+**Output:**
+```json
+{
+  "permafail": true,
+  "confidence": 0.99,
+  "reason": "All 4 runs that reached e2e tests failed on '[sig-network] Networking should provide connectivity' (100% match). 3 additional runs failed during infrastructure setup (cluster creation, AWS quota) and are not relevant to this test failure pattern. This is a systematic test failure caused by the PR changes.",
+  "failure_type": "test_failure",
+  "signatures": [
+    {
+      "type": "infra_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1111",
+      "error": "Cluster creation timeout",
+      "error_hash": "a1b2c3d4"
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1112",
+      "tests": ["[sig-network] Networking should provide connectivity"],
+      "test_count": 1
+    },
+    {
+      "type": "infra_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1113",
+      "error": "AWS quota exceeded",
+      "error_hash": "e5f6g7h8"
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1114",
+      "tests": ["[sig-network] Networking should provide connectivity"],
+      "test_count": 1
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1115",
+      "tests": ["[sig-network] Networking should provide connectivity"],
+      "test_count": 1
+    },
+    {
+      "type": "infra_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1116",
+      "error": "Cluster creation timeout",
+      "error_hash": "a1b2c3d4"
+    },
+    {
+      "type": "test_failure",
+      "url": "https://prow.ci.openshift.org/view/gs://..../logs/periodic-ci-openshift-release-main-ci-4.19-e2e-aws-upgrade-ovn-single-node/1117",
+      "tests": ["[sig-network] Networking should provide connectivity"],
+      "test_count": 1
+    }
+  ],
+  "common_tests": ["[sig-network] Networking should provide connectivity"]
+}
+```
+
+### Example 3: Non-Permafail - No Consistent Pattern
+
+**Input:** 3 runs with different test failures
+
+**ci-prow-navigation Results:**
 - Run 1: Failed tests = ["[sig-network] networking should support networking"] (test_failure)
-- Run 2: Infrastructure failure = "Pod evicted: insufficient memory" (infra_failure)
-- Run 3: Failed tests = ["[sig-storage] storage should support volumes"] (test_failure)
+- Run 2: Failed tests = ["[sig-storage] storage should support volumes"] (test_failure)
+- Run 3: Failed tests = ["[sig-api] API discovery should work"] (test_failure)
 
 **Output:**
 ```json
 {
   "permafail": false,
-  "confidence": 0.85,
-  "reason": "Mixed failure types detected across 3 runs: test_failure, infra_failure, test_failure. Different tests failing in runs 1 and 3 with infrastructure issue in run 2 indicates flaky/non-deterministic behavior, not a systematic permafail pattern.",
-  "failure_type": "mixed",
+  "confidence": 0.70,
+  "reason": "No consistent failure pattern detected. Each of the 3 runs failed with different tests: networking, storage, API discovery. This indicates flaky/non-deterministic behavior rather than a systematic permafail.",
+  "failure_type": "test_failure",
   "signatures": [
     {
       "type": "test_failure",
-      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234567",
+      "url": "...",
       "tests": ["[sig-network] networking should support networking"],
       "test_count": 1
     },
     {
-      "type": "infra_failure",
-      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234568",
-      "error": "Pod evicted: insufficient memory",
-      "error_hash": "f4g5h6i7j8k9l0m1"
+      "type": "test_failure",
+      "url": "...",
+      "tests": ["[sig-storage] storage should support volumes"],
+      "test_count": 1
     },
     {
       "type": "test_failure",
-      "url": "https://prow.ci.openshift.org/view/gs://..../logs/pull-ci-openshift-origin-master-e2e-aws/2234569",
-      "tests": ["[sig-storage] storage should support volumes"],
+      "url": "...",
+      "tests": ["[sig-api] API discovery should work"],
       "test_count": 1
     }
   ]
