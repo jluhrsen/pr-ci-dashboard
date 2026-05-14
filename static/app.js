@@ -88,6 +88,7 @@ async function init() {
 
     // Context menu event listeners
     document.getElementById('clearPermafailItem').addEventListener('click', handleClearPermafail);
+    document.getElementById('forceReanalyzeItem').addEventListener('click', handleForceReanalyze);
     document.addEventListener('click', hideContextMenu);
 
     // Check for Permafail button event delegation
@@ -338,6 +339,88 @@ async function handleClearPermafail() {
     }
 
     hideContextMenu();
+}
+
+async function handleForceReanalyze() {
+    if (!contextMenuTarget) return;
+
+    const { jobElement, jobKey } = contextMenuTarget;
+    const jobUrls = JSON.parse(jobElement.dataset.jobUrls || '[]');
+
+    if (!jobUrls || jobUrls.length === 0) {
+        console.error('No job URLs found on element');
+        hideContextMenu();
+        return;
+    }
+
+    hideContextMenu();
+
+    try {
+        // Delete cached analysis for all URLs
+        showToast('Deleting cached analysis...', 'info');
+
+        const deleteResponse = await fetch('/api/jobs/delete-cache', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_urls: jobUrls })
+        });
+
+        if (!deleteResponse.ok) {
+            const error = await deleteResponse.json();
+            showToast('Failed to delete cache: ' + (error.error || 'Unknown error'), 'error');
+            return;
+        }
+
+        const deleteResult = await deleteResponse.json();
+        console.log(`Deleted ${deleteResult.deleted_count} cached record(s)`);
+
+        // Clear permafail UI
+        clearPermafailUI(jobElement, jobKey);
+
+        // Trigger fresh analysis
+        showToast('Starting fresh analysis...', 'info');
+
+        const owner = jobElement.dataset.owner;
+        const repo = jobElement.dataset.repo;
+        const pr = jobElement.dataset.pr;
+        const jobName = jobElement.dataset.jobName;
+
+        const analyzeResponse = await fetch('/api/jobs/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pr: `${owner}/${repo}#${pr}`,
+                repo: `${owner}/${repo}`,
+                job_name: jobName,
+                job_urls: jobUrls.slice(0, 10)
+            })
+        });
+
+        if (!analyzeResponse.ok) {
+            throw new Error(`Analysis request failed: ${analyzeResponse.status} ${analyzeResponse.statusText}`);
+        }
+
+        const result = await analyzeResponse.json();
+
+        // Check for analysis error
+        if (result.error) {
+            showToast(`Fresh analysis failed: ${result.reason}`, 'error');
+            return;
+        }
+
+        if (result.permafail) {
+            // Mark as permafail with fresh analysis
+            renderPermafailIcon(jobElement, result.reason);
+            permafailJobs.set(jobKey, result);
+            showToast('Fresh analysis: Permafail detected - ' + result.reason, 'error');
+        } else {
+            // No permafail detected
+            showToast('Fresh analysis: No permafail detected - safe to retest', 'success');
+        }
+    } catch (error) {
+        console.error('Force re-analyze failed:', error);
+        showToast('Force re-analyze failed: ' + error.message, 'error');
+    }
 }
 
 function attachJobCardEvents(jobElement, jobKey) {
