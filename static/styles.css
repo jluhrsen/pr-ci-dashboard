@@ -260,14 +260,14 @@ h1 {
 }
 
 .permafail-modal-content {
-    background-color: var(--bg);
+    background-color: #ffffff;
     margin: 10% auto;
     padding: 20px;
     border: 1px solid var(--border);
     border-radius: 8px;
     width: 80%;
     max-width: 600px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
 .permafail-modal-header {
@@ -281,14 +281,14 @@ h1 {
 
 .permafail-modal-header h3 {
     margin: 0;
-    color: var(--error);
+    color: #dc3545;
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
 .permafail-modal-close {
-    color: var(--text-secondary);
+    color: #6c757d;
     font-size: 28px;
     font-weight: bold;
     cursor: pointer;
@@ -299,11 +299,11 @@ h1 {
 }
 
 .permafail-modal-close:hover {
-    color: var(--text);
+    color: #000000;
 }
 
 .permafail-modal-body {
-    color: var(--text);
+    color: #212529;
     line-height: 1.6;
 }
 
