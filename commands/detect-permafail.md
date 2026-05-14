@@ -78,52 +78,65 @@ curl -sS 'https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-
 
 **3.3: Classify as test_failure vs infra_failure**
 
-Use these heuristics IN ORDER (first match wins):
+**CRITICAL PRINCIPLE: Classification is ARTIFACT-BASED, not message-based.**
 
-**INFRA_FAILURE indicators (job never reached e2e tests):**
-1. `prowjob.json` description contains:
-   - "Pod scheduling timeout"
-   - "Build failed"
-   - "Container failed to start"
-   - "setup failed"
-   - "Cluster failed to install"
-   - Any mention of "infra" or "infrastructure"
+The ONLY reliable way to determine if a job reached e2e tests is to check for test artifacts. Error messages and descriptions are misleading.
 
-2. Artifacts directory structure check using WebFetch on `https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/<JOB_NAME>/<JOB_ID>/artifacts/`:
-   - Missing `openshift-e2e-test/` or `e2e-<variant>/` directories → INFRA_FAILURE
-   - Only contains setup/build step directories → INFRA_FAILURE
+**Classification Algorithm (use in this exact order):**
 
-**TEST_FAILURE indicators (job reached e2e tests and failed):**
-1. Artifacts contain e2e test directories:
-   - `openshift-e2e-test/artifacts/junit/` exists
-   - `e2e-<variant>/` directory exists with test output
+**Step 1: Check for Test Artifacts (definitive TEST_FAILURE indicators)**
 
-2. `prowjob.json` description is "the test step failed" AND artifacts show e2e test execution
+Browse artifacts directory using WebFetch on:
+`https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/<JOB_NAME>/<JOB_ID>/artifacts/`
 
-3. Build log shows test execution:
-   ```bash
-   curl -sS '<artifacts_url>/openshift-e2e-test/artifacts/e2e-<variant>/build-log.txt' | head -100
-   ```
-   - Contains test names (e.g., "[sig-network]", "TestNetworkPolicy")
-   - Contains "FAIL:" lines with test failures
-   - Contains junit output
+If ANY of these exist → **TEST_FAILURE**:
+1. `openshift-e2e-test/` directory with subdirectories
+2. `e2e-<variant>/` directory (e.g., `e2e-aws-ovn/`)
+3. `junit/` directory anywhere in artifacts tree
+4. Files containing "junit" in the name (e.g., `junit_e2e_*.xml`)
+5. Directories matching test step patterns: `openshift-tests-*`, `monitor-test-*`
+
+**Step 2: Check for Build/Setup Artifacts Only (INFRA_FAILURE indicators)**
+
+If artifacts ONLY contain setup/build directories → **INFRA_FAILURE**:
+- Only `ipi-install-*` directories
+- Only `gather-*` directories (without test output)
+- Only `pull-ci-*` or build step directories
+- Empty artifacts directory
+- No junit files, no test directories
+
+**Step 3: Special Cases**
+
+**MonitorTest failures** (e.g., "MetricsEndpointDown", "MonitorTest") → **TEST_FAILURE**
+- MonitorTests run DURING e2e execution to monitor cluster health
+- If a job mentions MonitorTest, it reached e2e tests
+- Check for `monitor-test-*/` directories or junit files to confirm
+
+**Missing test output** → Check artifacts:
+- If artifacts show test directories but no output → **TEST_FAILURE** (tests started but failed to complete)
+- If artifacts completely empty or only setup dirs → **INFRA_FAILURE**
 
 **3.4: Extract Failure Details**
 
 **For TEST_FAILURE:**
-- Fetch junit files or build-log.txt from e2e test artifacts
-- Extract failing test names (look for "FAIL:", "[sig-...]", test descriptions)
-- Return array of failing test names
+- Check junit files first: Look for `<testcase>` elements with `<failure>` or `<error>` tags
+- Extract test names from junit classname and name attributes
+- If no junit files, fetch build-log.txt from test directories:
+  ```bash
+  curl -sS '<artifacts_url>/openshift-e2e-test/artifacts/junit/junit_e2e_*.xml'
+  # OR
+  curl -sS '<artifacts_url>/e2e-<variant>/build-log.txt' | grep -E 'FAIL:|^\[sig-'
+  ```
+- Return array of ALL failing test names found
 
 **For INFRA_FAILURE:**
-- Extract error message from prowjob.json description
-- Or fetch build-log.txt from the failing setup step
+- Fetch prowjob.json description for high-level error
+- If description is generic ("the test step failed"), fetch build logs from the last setup step that ran
 - Extract the core error (first 200 chars of relevant error message)
 - Normalize by removing timestamps, build IDs, node names
 
 **3.5: Return Structured Response**
 
-Expected response structure for each job analysis:
 ```json
 {
   "job_url": "string",
@@ -133,13 +146,18 @@ Expected response structure for each job analysis:
   "details": {
     "tests": ["test1", "test2"],           // for test_failure
     "error_message": "string",             // for infra_failure
-    "log_snippet": "string",
-    "artifacts_checked": ["prowjob.json", "build-log.txt", "junit/"]
+    "artifacts_found": ["junit/", "openshift-e2e-test/"],  // list what you found
+    "classification_reason": "string"      // explain why you chose this classification
   }
 }
 ```
 
-**CRITICAL**: Do NOT rely solely on prowjob.json description. Many jobs say "the test step failed" even when they failed during setup. Always check artifacts directory to confirm e2e test execution occurred.
+**CRITICAL RULES:**
+1. **NEVER** classify based on error message alone
+2. **ALWAYS** check artifacts directory first
+3. MonitorTest failures = TEST_FAILURE (tests were running)
+4. If in doubt, presence of ANY test-related artifacts = TEST_FAILURE
+5. INFRA_FAILURE only if artifacts prove tests never started
 
 ### Step 4: Extract Failure Signatures from Each Result
 
