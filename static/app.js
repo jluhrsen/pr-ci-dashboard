@@ -167,7 +167,26 @@ function renderPermafailIcon(jobElement, reason) {
     }
 }
 
-function showPermafailModal(reason) {
+function renderNonPermafailInfo(jobElement, reason) {
+    const jobHeader = jobElement.querySelector('.job-name') || jobElement;
+
+    // Remove existing info icon if present
+    const existing = jobElement.querySelector('.analysis-info-icon');
+    if (existing) existing.remove();
+
+    // Add info icon (using emoji)
+    const icon = document.createElement('span');
+    icon.className = 'analysis-info-icon';
+    icon.textContent = 'ℹ️';
+    icon.title = 'Click to view analysis reasoning';
+    icon.style.cursor = 'pointer';
+    icon.style.marginLeft = '8px';
+    icon.style.fontSize = '16px';
+    icon.onclick = () => showPermafailModal(reason, false);
+    jobHeader.appendChild(icon);
+}
+
+function showPermafailModal(reason, isPermafail = true) {
     // Create modal if it doesn't exist
     let modal = document.getElementById('permafail-modal');
     if (!modal) {
@@ -177,9 +196,9 @@ function showPermafailModal(reason) {
         modal.innerHTML = `
             <div class="permafail-modal-content">
                 <div class="permafail-modal-header">
-                    <h3>
-                        <img src="/static/dumpster-fire.svg" width="24" height="24" alt="">
-                        Permafail Detected
+                    <h3 id="permafail-modal-title">
+                        <img src="/static/dumpster-fire.svg" width="24" height="24" alt="" id="permafail-modal-icon">
+                        <span id="permafail-modal-title-text">Permafail Detected</span>
                     </h3>
                     <button class="permafail-modal-close">&times;</button>
                 </div>
@@ -206,6 +225,21 @@ function showPermafailModal(reason) {
                 closeModal();
             }
         };
+    }
+
+    // Update modal title and icon based on type
+    const titleText = modal.querySelector('#permafail-modal-title-text');
+    const icon = modal.querySelector('#permafail-modal-icon');
+    const header = modal.querySelector('.permafail-modal-header h3');
+
+    if (isPermafail) {
+        titleText.textContent = 'Permafail Detected';
+        icon.style.display = 'inline';
+        header.style.color = '#dc3545';
+    } else {
+        titleText.textContent = 'Analysis Result';
+        icon.style.display = 'none';
+        header.style.color = '#28a745';
     }
 
     // Update modal content and show
@@ -440,7 +474,9 @@ async function handleForceReanalyze() {
             }
             showToast('Fresh analysis: Permafail detected - ' + result.reason, 'error');
         } else {
-            // No permafail detected
+            // No permafail detected - store result and show info icon
+            permafailJobs.set(jobKey, result);
+            renderNonPermafailInfo(jobElement, result.reason);
             if (checkPermafailBtn) {
                 checkPermafailBtn.textContent = 'No permafail detected';
                 setTimeout(() => {
@@ -929,7 +965,9 @@ async function manualPermafailCheck(jobElement, buttonElement) {
             buttonElement.style.display = 'none';
             showToast('Permafail detected: ' + result.reason, 'error');
         } else {
-            // No permafail detected
+            // No permafail detected - store result and show info icon
+            permafailJobs.set(jobKey, result);
+            renderNonPermafailInfo(jobElement, result.reason);
             buttonElement.textContent = 'No permafail detected';
             setTimeout(() => {
                 buttonElement.textContent = 'Check for Permafail';
