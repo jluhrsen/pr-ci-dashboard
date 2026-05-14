@@ -137,6 +137,9 @@ def analyze_job_stream():
         except ValueError:
             return jsonify({"error": "Invalid PR number: must be an integer"}), 400
 
+        # Capture db_path before generator starts (while in Flask request context)
+        db_path = current_app.config.get('DB_PATH')
+
         def generate():
             """Generator function for SSE stream"""
             final_result = None
@@ -157,7 +160,6 @@ def analyze_job_stream():
 
             # Cache results if we got a final result
             if final_result:
-                db_path = current_app.config.get('DB_PATH')
                 for i, url in enumerate(data["job_urls"]):
                     signature = final_result.get("signatures", [])[i] if i < len(final_result.get("signatures", [])) else {}
                     store_analysis(
