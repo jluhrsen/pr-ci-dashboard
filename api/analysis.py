@@ -1,8 +1,8 @@
 # api/analysis.py
 import json
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, Response
 from utils.db import store_analysis, get_permafail_status, set_override, delete_cached_analyses
-from utils.ai_analyzer import analyze_permafail
+from utils.ai_analyzer import analyze_permafail, analyze_permafail_streaming
 
 analysis_bp = Blueprint('analysis', __name__)
 
@@ -89,6 +89,88 @@ def analyze_job():
             "reason": result.get("reason", ""),
             "test_names": result.get("common_tests", [])
         })
+
+    except Exception as e:
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/jobs/analyze-stream', methods=['POST'])
+def analyze_job_stream():
+    """
+    Trigger permafail analysis with streaming output via SSE
+
+    Request: {
+        "pr": "openshift/ovn-kubernetes#1234",
+        "repo": "openshift/ovn-kubernetes",
+        "job_name": "e2e-aws-ovn",
+        "job_urls": ["url1", "url2", "url3"]
+    }
+
+    Response: Server-Sent Events stream with:
+        - type: "output" - line of output from Claude CLI
+        - type: "result" - final analysis result
+    """
+    try:
+        data = request.get_json(force=True, silent=False)
+    except Exception:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    try:
+        if not data:
+            return jsonify({"error": "Invalid JSON"}), 400
+
+        required_fields = ["pr", "repo", "job_name", "job_urls"]
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"error": f"Missing field: {field}"}), 400
+
+        if len(data["job_urls"]) < 2 or len(data["job_urls"]) > 10:
+            return jsonify({"error": "2 to 10 job URLs required"}), 400
+
+        # Parse PR info
+        pr_parts = data["pr"].split("#")
+        if len(pr_parts) != 2:
+            return jsonify({"error": "Invalid PR format"}), 400
+
+        try:
+            pr_number = int(pr_parts[1])
+        except ValueError:
+            return jsonify({"error": "Invalid PR number: must be an integer"}), 400
+
+        def generate():
+            """Generator function for SSE stream"""
+            final_result = None
+
+            # Stream analysis output
+            for event_json in analyze_permafail_streaming(
+                data["job_urls"],
+                data["job_name"],
+                data["pr"]
+            ):
+                event = json.loads(event_json)
+
+                if event["type"] == "result":
+                    final_result = event["data"]
+
+                # Send as SSE event
+                yield f"data: {event_json}\n\n"
+
+            # Cache results if we got a final result
+            if final_result:
+                db_path = current_app.config.get('DB_PATH')
+                for i, url in enumerate(data["job_urls"]):
+                    signature = final_result.get("signatures", [])[i] if i < len(final_result.get("signatures", [])) else {}
+                    store_analysis(
+                        job_url=url,
+                        pr_number=pr_number,
+                        repo=data["repo"],
+                        job_name=data["job_name"],
+                        signature=signature,
+                        permafail_result=final_result,
+                        db_path=db_path
+                    )
+
+        return Response(generate(), mimetype='text/event-stream')
 
     except Exception as e:
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500

@@ -91,6 +91,9 @@ async function init() {
     document.getElementById('forceReanalyzeItem').addEventListener('click', handleForceReanalyze);
     document.addEventListener('click', hideContextMenu);
 
+    // Terminal modal event listener
+    document.getElementById('terminalClose').addEventListener('click', hideTerminalModal);
+
     // Check for Permafail button event delegation
     document.addEventListener('click', async (e) => {
         if (e.target.classList.contains('check-permafail-btn')) {
@@ -400,7 +403,7 @@ async function handleForceReanalyze() {
             checkPermafailBtn.style.display = 'inline-block';
         }
 
-        // Trigger fresh analysis
+        // Trigger fresh streaming analysis
         showToast('Starting fresh analysis...', 'info');
 
         const owner = jobElement.dataset.owner;
@@ -408,22 +411,12 @@ async function handleForceReanalyze() {
         const pr = jobElement.dataset.pr;
         const jobName = jobElement.dataset.jobName;
 
-        const analyzeResponse = await fetch('/api/jobs/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                pr: `${owner}/${repo}#${pr}`,
-                repo: `${owner}/${repo}`,
-                job_name: jobName,
-                job_urls: jobUrls.slice(0, 10)
-            })
-        });
-
-        if (!analyzeResponse.ok) {
-            throw new Error(`Analysis request failed: ${analyzeResponse.status} ${analyzeResponse.statusText}`);
-        }
-
-        const result = await analyzeResponse.json();
+        const result = await analyzeWithStreaming(
+            `${owner}/${repo}#${pr}`,
+            `${owner}/${repo}`,
+            jobName,
+            jobUrls.slice(0, 10)
+        );
 
         // Check for analysis error
         if (result.error) {
@@ -909,24 +902,14 @@ async function manualPermafailCheck(jobElement, buttonElement) {
             }
         }
 
-        // No cached result, run analysis
+        // No cached result, run streaming analysis
         buttonElement.textContent = 'Analyzing...';
-        const response = await fetch('/api/jobs/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                pr: `${owner}/${repo}#${pr}`,
-                repo: `${owner}/${repo}`,
-                job_name: jobName,
-                job_urls: jobUrls.slice(0, 10)  // Send up to 10 URLs for pattern detection
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`Analysis request failed: ${response.status} ${response.statusText}`);
-        }
-
-        const result = await response.json();
+        const result = await analyzeWithStreaming(
+            `${owner}/${repo}#${pr}`,
+            `${owner}/${repo}`,
+            jobName,
+            jobUrls.slice(0, 10)  // Send up to 10 URLs for pattern detection
+        );
 
         // Check for analysis error
         if (result.error) {
@@ -1103,4 +1086,86 @@ function showAuthBanner(message) {
 
 function showCardError(cardElement, message) {
     cardElement.innerHTML += `<div style="color: var(--primary); padding: 1rem;">⚠️ Error: ${message}</div>`;
+}
+
+// Terminal Modal Functions
+function showTerminalModal() {
+    const modal = document.getElementById('terminalModal');
+    const body = document.getElementById('terminalBody');
+    body.innerHTML = ''; // Clear previous content
+    modal.style.display = 'flex';
+}
+
+function hideTerminalModal() {
+    const modal = document.getElementById('terminalModal');
+    modal.style.display = 'none';
+}
+
+function appendTerminalLine(text) {
+    const body = document.getElementById('terminalBody');
+    const line = document.createElement('div');
+    line.className = 'terminal-line';
+    line.textContent = text;
+    body.appendChild(line);
+    // Auto-scroll to bottom
+    body.scrollTop = body.scrollHeight;
+}
+
+// SSE Streaming Analysis
+async function analyzeWithStreaming(pr, repo, jobName, jobUrls) {
+    return new Promise((resolve, reject) => {
+        const eventSource = new EventSource('/api/jobs/analyze-stream');
+
+        // Show terminal modal
+        showTerminalModal();
+
+        // Send analysis request via fetch first
+        fetch('/api/jobs/analyze-stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pr: pr,
+                repo: repo,
+                job_name: jobName,
+                job_urls: jobUrls
+            })
+        }).then(async response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep incomplete line in buffer
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = JSON.parse(line.substring(6));
+
+                        if (data.type === 'output') {
+                            appendTerminalLine(data.line);
+                        } else if (data.type === 'result') {
+                            resolve(data.data);
+                            return;
+                        } else if (data.type === 'error') {
+                            appendTerminalLine('ERROR: ' + data.message);
+                            reject(new Error(data.message));
+                            return;
+                        }
+                    }
+                }
+            }
+        }).catch(error => {
+            appendTerminalLine('Connection error: ' + error.message);
+            reject(error);
+        });
+    });
 }
