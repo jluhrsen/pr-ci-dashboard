@@ -17,6 +17,12 @@ const PERMAFAIL_CHECK_THRESHOLD = 3; // Check for permafail on 3rd consecutive f
 // Permafail tracking
 const permafailJobs = new Map(); // jobKey -> {permafail: bool, reason: str, override: bool}
 
+// Auto-retest state tracking
+const autoRetestEnabled = new Map(); // "owner/repo/number" -> boolean
+const jobFailureCounters = new Map(); // "owner/repo/number/jobName" -> count
+const jobStateCache = new Map(); // "owner/repo/number/jobName" -> 'success'|'failure'|'pending'
+const pollingIntervals = new Map(); // "owner/repo/number" -> intervalId
+
 // Context menu tracking
 let contextMenuTarget = null;
 
@@ -49,6 +55,9 @@ async function init() {
     DOM.authBanner = document.getElementById('auth-banner');
     DOM.prContainer = document.getElementById('pr-cards-container');
     DOM.toastContainer = document.getElementById('toast-container');
+
+    // Load auto-retest state from localStorage
+    loadAutoRetestState();
 
     // Check auth status
     const authStatus = await checkAuth();
@@ -101,6 +110,24 @@ async function init() {
             await manualPermafailCheck(jobElement, e.target);
         }
     });
+
+    // Auto-retest toggle event delegation
+    document.addEventListener('change', (e) => {
+        if (e.target.classList.contains('auto-retest-toggle')) {
+            const prKey = e.target.dataset.prKey;
+            const enabled = e.target.checked;
+            autoRetestEnabled.set(prKey, enabled);
+            saveAutoRetestState();
+
+            if (enabled) {
+                startPollingForPR(prKey);
+                showToast(`Auto-retest enabled for PR ${prKey.split('/').pop()}`, 'success');
+            } else {
+                stopPollingForPR(prKey);
+                showToast(`Auto-retest disabled for PR ${prKey.split('/').pop()}`, 'info');
+            }
+        }
+    });
 }
 
 async function checkAuth() {
@@ -110,6 +137,162 @@ async function checkAuth() {
     } catch (error) {
         console.error('Auth check failed:', error);
         return { authenticated: false, error: 'Failed to check authentication status' };
+    }
+}
+
+// ========================================
+// Auto-Retest State Management
+// ========================================
+function loadAutoRetestState() {
+    try {
+        const saved = localStorage.getItem('autoRetestEnabled');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            Object.entries(parsed).forEach(([key, val]) => {
+                autoRetestEnabled.set(key, val);
+            });
+            console.log(`Loaded auto-retest state for ${Object.keys(parsed).length} PR(s)`);
+        }
+    } catch (error) {
+        console.error('Failed to load auto-retest state:', error);
+    }
+}
+
+function saveAutoRetestState() {
+    try {
+        const obj = {};
+        autoRetestEnabled.forEach((val, key) => {
+            obj[key] = val;
+        });
+        localStorage.setItem('autoRetestEnabled', JSON.stringify(obj));
+    } catch (error) {
+        console.error('Failed to save auto-retest state:', error);
+    }
+}
+
+function startPollingForPR(prKey) {
+    // Don't start if already polling
+    if (pollingIntervals.has(prKey)) {
+        return;
+    }
+
+    console.log(`Starting auto-retest polling for ${prKey}`);
+
+    // Poll immediately, then every 30 seconds
+    checkJobStatesForAutoRetest(prKey);
+    const intervalId = setInterval(() => {
+        checkJobStatesForAutoRetest(prKey);
+    }, 30000);
+
+    pollingIntervals.set(prKey, intervalId);
+}
+
+function stopPollingForPR(prKey) {
+    const intervalId = pollingIntervals.get(prKey);
+    if (intervalId) {
+        clearInterval(intervalId);
+        pollingIntervals.delete(prKey);
+        console.log(`Stopped auto-retest polling for ${prKey}`);
+    }
+}
+
+async function checkJobStatesForAutoRetest(prKey) {
+    const [owner, repo, number] = prKey.split('/');
+
+    try {
+        const response = await fetch(`/api/pr/${owner}/${repo}/${number}`);
+        if (!response.ok) {
+            console.error(`Failed to fetch jobs for ${prKey}`);
+            return;
+        }
+
+        const data = await response.json();
+        const allJobs = [...data.e2e, ...data.payload];
+
+        for (const job of allJobs) {
+            const jobKey = `${prKey}/${job.name}`;
+            const currentState = job.state;
+            const previousState = jobStateCache.get(jobKey);
+
+            // Detect state transition: success -> failure
+            if (previousState === 'success' && currentState === 'failure') {
+                const count = (jobFailureCounters.get(jobKey) || 0) + 1;
+                jobFailureCounters.set(jobKey, count);
+
+                console.log(`Job ${job.name} failed (attempt ${count})`);
+
+                if (count <= MAX_AUTO_RETEST_FAILURES) {
+                    // Auto-retest immediately (1st or 2nd failure)
+                    console.log(`Auto-retesting ${job.name} (attempt ${count})`);
+                    await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+                    showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
+                } else if (count === PERMAFAIL_CHECK_THRESHOLD) {
+                    // Check permafail before retesting on 3rd failure
+                    console.log(`Checking permafail for ${job.name} before attempt ${count}`);
+                    await checkPermafailBeforeRetest(owner, repo, number, job, prKey);
+                }
+            }
+
+            // Update cache
+            jobStateCache.set(jobKey, currentState);
+        }
+    } catch (error) {
+        console.error(`Error checking job states for ${prKey}:`, error);
+    }
+}
+
+async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
+    try {
+        // Get job URLs from the job object
+        const jobUrls = job.urls || [];
+
+        if (jobUrls.length < 2) {
+            console.warn(`Not enough job URLs for permafail check on ${job.name}`);
+            // Retest anyway if we can't check
+            await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+            return;
+        }
+
+        showToast(`Checking for permafail pattern on ${job.name}...`, 'info');
+
+        const response = await fetch('/api/jobs/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pr: `${owner}/${repo}#${number}`,
+                repo: `${owner}/${repo}`,
+                job_name: job.name,
+                job_urls: jobUrls
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.permafail) {
+            // Permafail detected - disable auto-retest for this PR
+            autoRetestEnabled.set(prKey, false);
+            saveAutoRetestState();
+            stopPollingForPR(prKey);
+
+            // Update UI toggle
+            const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
+            if (toggleElement) {
+                toggleElement.checked = false;
+                toggleElement.disabled = true;
+            }
+
+            showToast(`⚠️ Permafail detected on ${job.name}: ${result.reason}`, 'error');
+            console.log(`Disabled auto-retest for ${prKey} due to permafail`);
+        } else {
+            // Not a permafail - proceed with retest
+            console.log(`No permafail detected on ${job.name}, retesting...`);
+            await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+            showToast(`🔄 Retesting ${job.name} (permafail check passed)`, 'info');
+        }
+    } catch (error) {
+        console.error('Error checking permafail:', error);
+        // On error, allow retest (fail open)
+        await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
     }
 }
 
@@ -603,12 +786,31 @@ function createPRCard(pr) {
     prHeader.appendChild(prTitle);
     prHeader.appendChild(prMeta);
 
+    // Auto-retest toggle
+    const prKey = `${pr.owner}/${pr.repo}/${pr.number}`;
+    const autoRetestControl = createElement('div', 'auto-retest-control');
+    const toggleLabel = createElement('label');
+    const toggleCheckbox = createElement('input', 'auto-retest-toggle');
+    toggleCheckbox.type = 'checkbox';
+    toggleCheckbox.dataset.prKey = prKey;
+    toggleCheckbox.checked = autoRetestEnabled.get(prKey) || false;
+
+    toggleLabel.appendChild(toggleCheckbox);
+    toggleLabel.appendChild(document.createTextNode(' 🔄 Auto-retest on failure'));
+    autoRetestControl.appendChild(toggleLabel);
+
+    // Start polling if toggle is already enabled
+    if (toggleCheckbox.checked) {
+        startPollingForPR(prKey);
+    }
+
     // Job sections container
     const jobSectionsContainer = createElement('div', 'job-sections-container');
     jobSectionsContainer.appendChild(createJobSectionPlaceholder('e2e', pr.owner, pr.repo, pr.number));
     jobSectionsContainer.appendChild(createJobSectionPlaceholder('payload', pr.owner, pr.repo, pr.number));
 
     card.appendChild(prHeader);
+    card.appendChild(autoRetestControl);
     card.appendChild(jobSectionsContainer);
 
     return card;
