@@ -6,7 +6,7 @@ import re
 
 def analyze_permafail_streaming(job_urls, job_name, pr_info):
     """
-    Analyze job URLs for permafail pattern using Claude Code CLI with streaming output
+    Analyze job URLs for permafail pattern using ci:detect-permafail command with streaming output
 
     Args:
         job_urls: List of 2-10 consecutive Prow job URLs
@@ -18,52 +18,30 @@ def analyze_permafail_streaming(job_urls, job_name, pr_info):
 
     Returns:
         dict: Final analysis result (via final yield)
+
+    Prerequisites:
+    - Claude CLI must be installed
+    - ci@ai-helpers plugin must be installed and up to date (>= 0.0.43)
     """
-    # Get the project root directory (where .claude-plugin/ exists)
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    # Read both skill definitions
-    detect_permafail_path = os.path.join(project_root, 'commands', 'detect-permafail.md')
-    ci_prow_nav_path = os.path.join(project_root, '.claude', 'skills', 'ci-prow-navigation', 'SKILL.md')
-
-    try:
-        with open(detect_permafail_path, 'r') as f:
-            detect_permafail_content = f.read()
-        with open(ci_prow_nav_path, 'r') as f:
-            ci_prow_nav_content = f.read()
-    except FileNotFoundError as e:
-        yield json.dumps({
-            "type": "error",
-            "message": f"Skill file not found: {e}"
-        })
-        return
-
-    # Build prompt with skill definitions and instructions
+    # Build prompt to invoke the ci:detect-permafail command
     urls_json = json.dumps(job_urls)
-    prompt = f"""{detect_permafail_content}
+    prompt = f"""Use the /ci:detect-permafail command to analyze these jobs for permafail.
 
----SKILL---
-
-{ci_prow_nav_content}
-
----TASK---
-
-Using the detect-permafail logic and ci-prow-navigation skill defined above, analyze these jobs for permafail. Do NOT use the Skill tool — execute the ci-prow-navigation steps directly using WebFetch and Bash.
-
-Jobs: {urls_json}
-Job name: {job_name}
-PR: {pr_info}
+--job-urls='{urls_json}'
+--job-name="{job_name}"
+--pr="{pr_info}"
 
 Return ONLY the final JSON result with no additional explanation."""
 
     # Send initial status
     yield json.dumps({"type": "output", "line": "==> Starting Claude CLI analysis..."})
     yield json.dumps({"type": "output", "line": f"==> Analyzing {len(job_urls)} job URLs for permafail patterns"})
+    yield json.dumps({"type": "output", "line": "==> Using ci:detect-permafail command from ai-helpers plugin"})
     yield json.dumps({"type": "output", "line": ""})
 
     cmd = [
         'claude',
-        '--allowedTools', 'WebFetch,Bash'
+        '--allowedTools', 'Skill,WebFetch,Bash'
         # Removed --print to see interactive output
     ]
 
@@ -224,7 +202,7 @@ Return ONLY the final JSON result with no additional explanation."""
 
 def analyze_permafail(job_urls, job_name, pr_info):
     """
-    Analyze job URLs for permafail pattern using Claude Code CLI
+    Analyze job URLs for permafail pattern using ci:detect-permafail command from ai-helpers plugin
 
     Args:
         job_urls: List of 2-10 consecutive Prow job URLs
@@ -234,49 +212,25 @@ def analyze_permafail(job_urls, job_name, pr_info):
     Returns:
         dict: Analysis result with permafail verdict and signatures.
               On error, returns dict with permafail=False, error message, and empty signatures list.
+
+    Prerequisites:
+    - Claude CLI must be installed
+    - ci@ai-helpers plugin must be installed and up to date (>= 0.0.43)
     """
-    import os
 
-    # Get the project root directory (where .claude-plugin/ exists)
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    # Read both skill definitions
-    detect_permafail_path = os.path.join(project_root, 'commands', 'detect-permafail.md')
-    ci_prow_nav_path = os.path.join(project_root, '.claude', 'skills', 'ci-prow-navigation', 'SKILL.md')
-
-    try:
-        with open(detect_permafail_path, 'r') as f:
-            detect_permafail_content = f.read()
-        with open(ci_prow_nav_path, 'r') as f:
-            ci_prow_nav_content = f.read()
-    except FileNotFoundError as e:
-        return {
-            "permafail": False,
-            "error": f"Skill file not found: {e}",
-            "signatures": []
-        }
-
-    # Build prompt with skill definitions and instructions
+    # Build prompt to invoke the ci:detect-permafail command
     urls_json = json.dumps(job_urls)
-    prompt = f"""{detect_permafail_content}
+    prompt = f"""Use the /ci:detect-permafail command to analyze these jobs for permafail.
 
----SKILL---
-
-{ci_prow_nav_content}
-
----TASK---
-
-Using the detect-permafail logic and ci-prow-navigation skill defined above, analyze these jobs for permafail. Do NOT use the Skill tool — execute the ci-prow-navigation steps directly using WebFetch and Bash.
-
-Jobs: {urls_json}
-Job name: {job_name}
-PR: {pr_info}
+--job-urls='{urls_json}'
+--job-name="{job_name}"
+--pr="{pr_info}"
 
 Return ONLY the final JSON result with no additional explanation."""
 
     cmd = [
         'claude',
-        '--allowedTools', 'WebFetch,Bash',
+        '--allowedTools', 'Skill,WebFetch,Bash',
         '--print'
     ]
 

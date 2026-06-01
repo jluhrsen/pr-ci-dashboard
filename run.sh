@@ -26,6 +26,36 @@ fi
 echo -e "${GREEN}✅ GitHub CLI authenticated${NC}"
 echo ""
 
+# Check Claude CLI
+echo "Checking Claude CLI..."
+if ! command -v claude &> /dev/null; then
+    echo -e "${RED}❌ Claude CLI not found${NC}"
+    echo "Install it from: https://claude.ai/claude-code"
+    echo -e "${YELLOW}⚠️  Permafail detection will not work without Claude CLI${NC}"
+else
+    echo -e "${GREEN}✅ Claude CLI found${NC}"
+
+    # Check for ai-helpers plugin
+    echo "Checking for ai-helpers plugin..."
+    if ! claude plugin list 2>/dev/null | grep -q 'ci@ai-helpers'; then
+        echo -e "${YELLOW}⚠️  ai-helpers plugin not installed${NC}"
+        echo "Permafail detection requires the ai-helpers plugin."
+        echo ""
+        echo "To install:"
+        echo "  claude plugin marketplace add openshift-eng/ai-helpers"
+        echo "  claude plugin install ci@ai-helpers"
+        echo ""
+        read -p "Continue anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}✅ ai-helpers plugin installed${NC}"
+    fi
+fi
+echo ""
+
 # Check Python
 echo "Checking Python..."
 if ! command -v python3 &> /dev/null; then
