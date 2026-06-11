@@ -3,6 +3,9 @@ import json
 import os
 import re
 
+# Get project root directory
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def analyze_permafail_streaming(job_urls, job_name, pr_info):
     """
