@@ -603,6 +603,13 @@ function clearPermafailUI(jobElement, jobKey) {
         retestBtn.disabled = false;
     }
 
+    // Re-enable "Check for Permafail" button
+    const checkBtn = jobElement.querySelector('.check-permafail-btn');
+    if (checkBtn) {
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Check for Permafail';
+    }
+
     // Update state
     permafailJobs.delete(jobKey);
 }
@@ -641,6 +648,13 @@ async function loadCachedPermafailResults(list, failedJobs) {
 
                     renderPermafailIcon(jobElement, result.reason);
                     permafailJobs.set(jobKey, result);
+
+                    // Disable "Check for Permafail" button since we have a cached permafail
+                    const checkBtn = jobElement.querySelector('.check-permafail-btn');
+                    if (checkBtn) {
+                        checkBtn.disabled = true;
+                        checkBtn.textContent = 'Permafail (cached)';
+                    }
                 }
             }
         }
@@ -805,7 +819,8 @@ async function handleForceReanalyze() {
             renderPermafailIcon(jobElement, result.reason);
             permafailJobs.set(jobKey, result);
             if (checkPermafailBtn) {
-                checkPermafailBtn.style.display = 'none';
+                checkPermafailBtn.disabled = true;
+                checkPermafailBtn.textContent = 'Permafail (confirmed)';
             }
             showToast('Fresh analysis: Permafail detected - ' + result.reason, 'error');
         } else {
@@ -814,9 +829,9 @@ async function handleForceReanalyze() {
             renderNonPermafailInfo(jobElement, result.reason);
             if (checkPermafailBtn) {
                 checkPermafailBtn.textContent = 'No permafail detected';
+                checkPermafailBtn.disabled = false;
                 setTimeout(() => {
                     checkPermafailBtn.textContent = 'Check for Permafail';
-                    checkPermafailBtn.disabled = false;
                 }, 2000);
             }
             showToast('Fresh analysis: No permafail detected - safe to retest', 'success');
@@ -1151,11 +1166,8 @@ function createCheckPermafailButton(job, owner, repo, number) {
         btn.style.display = 'none';
     }
 
-    // Check if job already has permafail status
-    const jobKey = `${owner}/${repo}/${number}/${job.name}`;
-    if (permafailJobs.has(jobKey)) {
-        btn.style.display = 'none';
-    }
+    // Check if job already has permafail status (will be updated by loadCachedPermafailResults)
+    // Don't disable here - let the cache loading handle it
 
     return btn;
 }
