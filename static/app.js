@@ -316,6 +316,10 @@ async function checkJobStatesForAutoRetest(prKey) {
             }
         }
 
+        // Separate jobs into categories for processing
+        const jobsToRetestImmediately = [];
+        const jobsNeedingPermafailCheck = [];
+
         for (const job of allJobs) {
             const jobKey = `${prKey}/${job.name}`;
             const currentState = job.state;
@@ -323,45 +327,41 @@ async function checkJobStatesForAutoRetest(prKey) {
 
             // Handle already-failed jobs on first poll (previousState === undefined)
             if (previousState === undefined && currentState === 'failure') {
-                // This job is already failed when auto-retest was enabled
-                // Use the actual consecutive failure count from job.urls
                 const consecutiveFailures = job.urls?.length || 1;
                 jobFailureCounters.set(jobKey, consecutiveFailures);
 
-                console.log(`Found already-failed job ${job.name} with ${consecutiveFailures} consecutive failures`);
-
                 if (consecutiveFailures <= MAX_AUTO_RETEST_FAILURES) {
-                    // 1-2 failures: auto-retest immediately
-                    console.log(`Auto-retesting ${job.name} (attempt ${consecutiveFailures})`);
-                    await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
-                    showToast(`🔄 Retesting ${job.name} (attempt ${consecutiveFailures})`, 'info');
+                    jobsToRetestImmediately.push({ job, count: consecutiveFailures });
                 } else if (consecutiveFailures >= PERMAFAIL_CHECK_THRESHOLD) {
-                    // 3+ failures: check permafail before retesting
-                    console.log(`Checking permafail for ${job.name} (${consecutiveFailures} consecutive failures)`);
-                    await checkPermafailBeforeRetest(owner, repo, number, job, prKey);
+                    jobsNeedingPermafailCheck.push({ job, count: consecutiveFailures });
                 }
             }
-            // Detect state transitions that result in failure: pending -> failure OR success -> failure
+            // Detect state transitions that result in failure
             else if ((previousState === 'pending' || previousState === 'success') && currentState === 'failure') {
                 const count = (jobFailureCounters.get(jobKey) || 0) + 1;
                 jobFailureCounters.set(jobKey, count);
 
-                console.log(`Job ${job.name} failed (attempt ${count})`);
-
                 if (count <= MAX_AUTO_RETEST_FAILURES) {
-                    // Auto-retest immediately (1st or 2nd failure)
-                    console.log(`Auto-retesting ${job.name} (attempt ${count})`);
-                    await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
-                    showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
+                    jobsToRetestImmediately.push({ job, count });
                 } else if (count === PERMAFAIL_CHECK_THRESHOLD) {
-                    // Check permafail before retesting on 3rd failure
-                    console.log(`Checking permafail for ${job.name} before attempt ${count}`);
-                    await checkPermafailBeforeRetest(owner, repo, number, job, prKey);
+                    jobsNeedingPermafailCheck.push({ job, count });
                 }
             }
 
             // Update cache
             jobStateCache.set(jobKey, currentState);
+        }
+
+        // Process immediate retests (no permafail check needed)
+        for (const { job, count } of jobsToRetestImmediately) {
+            console.log(`Auto-retesting ${job.name} (attempt ${count})`);
+            await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+            showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
+        }
+
+        // Process permafail checks in batches of 2 with progress indicator
+        if (jobsNeedingPermafailCheck.length > 0) {
+            await processPermafailChecks(owner, repo, number, prKey, jobsNeedingPermafailCheck);
         }
 
         // Update UI to reflect any state changes (e.g., failed -> running after retest)
@@ -371,6 +371,63 @@ async function checkJobStatesForAutoRetest(prKey) {
         }
     } catch (error) {
         console.error(`Error checking job states for ${prKey}:`, error);
+    }
+}
+
+async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck) {
+    const totalJobs = jobsToCheck.length;
+    let completed = 0;
+    let progressToastId = null;
+
+    const updateProgress = () => {
+        const message = `🔍 Analyzing permafails for PR #${number}: ${completed}/${totalJobs} jobs`;
+        if (progressToastId) {
+            // Update existing toast
+            const existingToast = document.querySelector(`[data-toast-id="${progressToastId}"]`);
+            if (existingToast) {
+                existingToast.textContent = message;
+            } else {
+                progressToastId = showToast(message, 'info', 0); // 0 = persistent
+            }
+        } else {
+            progressToastId = showToast(message, 'info', 0); // 0 = persistent
+        }
+    };
+
+    updateProgress();
+
+    // Process in batches of 2
+    for (let i = 0; i < jobsToCheck.length; i += 2) {
+        // Stop early if auto-retest was disabled by previous permafail
+        if (!autoRetestEnabled.get(prKey)) {
+            console.log(`Auto-retest disabled for ${prKey}, stopping permafail checks`);
+            break;
+        }
+
+        const batch = jobsToCheck.slice(i, i + 2);
+
+        // Run up to 2 checks in parallel
+        await Promise.all(batch.map(async ({ job, count }) => {
+            console.log(`Checking permafail for ${job.name} (${count} consecutive failures)`);
+            await checkPermafailBeforeRetest(owner, repo, number, job, prKey);
+            completed++;
+            updateProgress();
+        }));
+    }
+
+    // Remove progress toast
+    if (progressToastId) {
+        const toastElement = document.querySelector(`[data-toast-id="${progressToastId}"]`);
+        if (toastElement) {
+            toastElement.remove();
+        }
+    }
+
+    // Show completion message
+    if (completed === totalJobs) {
+        showToast(`✅ Completed permafail analysis for ${totalJobs} jobs`, 'success');
+    } else {
+        showToast(`⚠️ Stopped after ${completed}/${totalJobs} jobs (auto-retest disabled)`, 'info');
     }
 }
 
