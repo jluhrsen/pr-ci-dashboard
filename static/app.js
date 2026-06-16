@@ -1497,12 +1497,10 @@ function appendTerminalLine(text) {
 // SSE Streaming Analysis
 async function analyzeWithStreaming(pr, repo, jobName, jobUrls) {
     return new Promise((resolve, reject) => {
-        const eventSource = new EventSource('/api/jobs/analyze-stream');
-
         // Show terminal modal
         showTerminalModal();
 
-        // Send analysis request via fetch first
+        // Send analysis request via fetch
         fetch('/api/jobs/analyze-stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
