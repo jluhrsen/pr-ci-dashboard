@@ -377,24 +377,10 @@ async function checkJobStatesForAutoRetest(prKey) {
 async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck) {
     const totalJobs = jobsToCheck.length;
     let completed = 0;
-    let progressToastId = null;
 
-    const updateProgress = () => {
-        const message = `🔍 Analyzing permafails for PR #${number}: ${completed}/${totalJobs} jobs`;
-        if (progressToastId) {
-            // Update existing toast
-            const existingToast = document.querySelector(`[data-toast-id="${progressToastId}"]`);
-            if (existingToast) {
-                existingToast.textContent = message;
-            } else {
-                progressToastId = showToast(message, 'info', 0); // 0 = persistent
-            }
-        } else {
-            progressToastId = showToast(message, 'info', 0); // 0 = persistent
-        }
-    };
-
-    updateProgress();
+    // Show initial progress toast (persistent)
+    const message = `🔍 Analyzing permafails for PR #${number}: ${completed}/${totalJobs} jobs`;
+    const progressToastId = showToast(message, 'info', 0);
 
     // Process in batches of 2
     for (let i = 0; i < jobsToCheck.length; i += 2) {
@@ -411,17 +397,13 @@ async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck) {
             console.log(`Checking permafail for ${job.name} (${count} consecutive failures)`);
             await checkPermafailBeforeRetest(owner, repo, number, job, prKey);
             completed++;
-            updateProgress();
+            // Update progress toast
+            updateToast(progressToastId, `🔍 Analyzing permafails for PR #${number}: ${completed}/${totalJobs} jobs`);
         }));
     }
 
     // Remove progress toast
-    if (progressToastId) {
-        const toastElement = document.querySelector(`[data-toast-id="${progressToastId}"]`);
-        if (toastElement) {
-            toastElement.remove();
-        }
-    }
+    removeToast(progressToastId);
 
     // Show completion message
     if (completed === totalJobs) {
@@ -1541,11 +1523,45 @@ function disableAllRetestButtons() {
 // ========================================
 // UI Feedback
 // ========================================
-function showToast(message, type = 'success') {
+// Track active toasts by ID for updates
+const activeToasts = new Map();
+let nextToastId = 1;
+
+function showToast(message, type = 'success', duration = 5000) {
+    // If duration is 0, make it persistent (no auto-remove)
+    // Returns toast ID for updating
+
+    const toastId = nextToastId++;
     const toast = createElement('div', `toast ${type}`, message);
+    toast.dataset.toastId = toastId;
     DOM.toastContainer.appendChild(toast);
 
-    setTimeout(() => toast.remove(), 5000);
+    activeToasts.set(toastId, toast);
+
+    if (duration > 0) {
+        setTimeout(() => {
+            toast.remove();
+            activeToasts.delete(toastId);
+        }, duration);
+    }
+
+    return toastId;
+}
+
+function updateToast(toastId, message) {
+    const toast = activeToasts.get(toastId);
+    if (toast) {
+        toast.textContent = message;
+    }
+    return toastId;
+}
+
+function removeToast(toastId) {
+    const toast = activeToasts.get(toastId);
+    if (toast) {
+        toast.remove();
+        activeToasts.delete(toastId);
+    }
 }
 
 function showLoading(message) {
