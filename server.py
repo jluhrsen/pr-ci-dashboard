@@ -1,15 +1,19 @@
 """Flask server for PR CI Dashboard."""
 import sys
+import os
 from flask import Flask, jsonify, request, render_template
 from utils.script_fetcher import fetch_scripts
 from utils.gh_auth import check_gh_auth
-from utils.db import init_db
+from utils.db import init_db, DB_PATH
 from api.search import search_prs
 from api.jobs import get_pr_jobs
 from api.retest import retest_jobs
 from api.analysis import analysis_bp
 
 app = Flask(__name__)
+
+# Configure database path
+app.config['DB_PATH'] = DB_PATH
 
 # Register blueprints
 app.register_blueprint(analysis_bp)

@@ -258,9 +258,20 @@ def get_job_status():
 
     try:
         db_path = current_app.config.get('DB_PATH')
+        print(f"[DEBUG] Cache check for {len(job_urls)} URLs")
+        print(f"[DEBUG] Using DB path: {db_path}")
         status = get_permafail_status(job_urls, db_path=db_path)
+        print(f"[DEBUG] Found {len(status)} cached results out of {len(job_urls)} requested")
+
+        # Log which URLs are missing from cache
+        missing_urls = [url for url in job_urls if url not in status]
+        if missing_urls:
+            print(f"[DEBUG] URLs not in cache:")
+            for url in missing_urls:
+                print(f"[DEBUG]   {url[:100]}...")
 
         return jsonify(status)
 
     except Exception as e:
+        print(f"[DEBUG] Cache check failed: {str(e)}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
