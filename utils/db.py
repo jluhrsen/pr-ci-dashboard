@@ -3,18 +3,27 @@ import os
 import json
 from datetime import datetime, UTC
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'dashboard.db')
+# Use persistent database location in user's home directory
+# This ensures the database survives server restarts when using run.sh
+DB_PATH = os.environ.get('PR_CI_DASHBOARD_DB',
+                         os.path.expanduser('~/.local/share/pr-ci-dashboard/dashboard.db'))
 
 def init_db(db_path=None):
     """Initialize database and create tables if they don't exist
 
     Args:
-        db_path: Optional path to database file. Defaults to dashboard.db in project root.
+        db_path: Optional path to database file. Defaults to ~/.local/share/pr-ci-dashboard/dashboard.db
 
     Raises:
         RuntimeError: If database initialization fails.
     """
     path = db_path or DB_PATH
+
+    # Ensure directory exists
+    db_dir = os.path.dirname(path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
     conn = None
     try:
         conn = sqlite3.connect(path)
