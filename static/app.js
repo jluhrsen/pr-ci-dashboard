@@ -233,7 +233,7 @@ async function checkJobStatesForAutoRetest(prKey) {
                 jobFailureCounters.set(jobKey, count);
 
                 console.log(`Found already-failed job ${job.name}, auto-retesting (attempt ${count})`);
-                await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+                await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
                 showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
             }
             // Detect state transition: success -> failure
@@ -246,7 +246,7 @@ async function checkJobStatesForAutoRetest(prKey) {
                 if (count <= MAX_AUTO_RETEST_FAILURES) {
                     // Auto-retest immediately (1st or 2nd failure)
                     console.log(`Auto-retesting ${job.name} (attempt ${count})`);
-                    await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+                    await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
                     showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
                 } else if (count === PERMAFAIL_CHECK_THRESHOLD) {
                     // Check permafail before retesting on 3rd failure
@@ -270,8 +270,8 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
 
         if (jobUrls.length < 2) {
             console.warn(`Not enough job URLs for permafail check on ${job.name}`);
-            // Retest anyway if we can't check
-            await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+            // Retest anyway if we can't check (skip tracking since this is auto-retest)
+            await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
             return;
         }
 
@@ -306,15 +306,15 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
             showToast(`⚠️ Permafail detected on ${job.name}: ${result.reason}`, 'error');
             console.log(`Disabled auto-retest for ${prKey} due to permafail`);
         } else {
-            // Not a permafail - proceed with retest
+            // Not a permafail - proceed with retest (skip tracking since this is auto-retest)
             console.log(`No permafail detected on ${job.name}, retesting...`);
-            await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+            await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
             showToast(`🔄 Retesting ${job.name} (permafail check passed)`, 'info');
         }
     } catch (error) {
         console.error('Error checking permafail:', error);
-        // On error, allow retest (fail open)
-        await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+        // On error, allow retest (fail open, skip tracking since this is auto-retest)
+        await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
     }
 }
 
@@ -1218,7 +1218,7 @@ async function manualPermafailCheck(jobElement, buttonElement) {
 // ========================================
 // Retest Logic
 // ========================================
-async function retestJob(owner, repo, pr, jobs, type) {
+async function retestJob(owner, repo, pr, jobs, type, skipTracking = false) {
     try {
         const response = await fetch('/api/retest', {
             method: 'POST',
@@ -1233,7 +1233,10 @@ async function retestJob(owner, repo, pr, jobs, type) {
             disableAllRetestButtons();
         } else if (result.success) {
             showToast(`✅ Retest triggered for ${jobs.length} job(s)`, 'success');
-            trackRetestedJobs(owner, repo, pr, jobs);
+            // Skip tracking for auto-retest (it has its own 30s polling)
+            if (!skipTracking) {
+                trackRetestedJobs(owner, repo, pr, jobs);
+            }
         } else {
             showToast(`❌ Error: ${result.error}`, 'error');
         }
