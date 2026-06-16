@@ -207,7 +207,18 @@ async function checkJobStatesForAutoRetest(prKey) {
         }
 
         const data = await response.json();
-        const allJobs = [...data.e2e, ...data.payload];
+
+        // Extract jobs from both e2e and payload, combining failed and running arrays
+        // Add state and type fields that the scripts don't provide
+        const e2eJobs = [
+            ...(data.e2e?.failed || []).map(j => ({ ...j, state: 'failure', type: 'e2e' })),
+            ...(data.e2e?.running || []).map(j => ({ ...j, state: 'pending', type: 'e2e' }))
+        ];
+        const payloadJobs = [
+            ...(data.payload?.failed || []).map(j => ({ ...j, state: 'failure', type: 'payload' })),
+            ...(data.payload?.running || []).map(j => ({ ...j, state: 'pending', type: 'payload' }))
+        ];
+        const allJobs = [...e2eJobs, ...payloadJobs];
 
         for (const job of allJobs) {
             const jobKey = `${prKey}/${job.name}`;
