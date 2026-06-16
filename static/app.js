@@ -258,6 +258,12 @@ async function checkJobStatesForAutoRetest(prKey) {
             // Update cache
             jobStateCache.set(jobKey, currentState);
         }
+
+        // Update UI to reflect any state changes (e.g., failed -> running after retest)
+        const card = document.getElementById(`pr-${owner}-${repo}-${number}`);
+        if (card) {
+            updateCardWithJobs(card, data, owner, repo, number);
+        }
     } catch (error) {
         console.error(`Error checking job states for ${prKey}:`, error);
     }
@@ -877,15 +883,20 @@ async function renderJobSection(cardElement, sectionId, jobData, owner, repo, nu
     // Filter jobs (remove ones that are now running after retest)
     let failed = (jobData.failed || []).filter(job => {
         const jobKey = `${owner}/${repo}/${number}/${job.name}`;
-        const retestInfo = retestedJobs.get(jobKey);
-        if (retestInfo) {
-            const isRunning = (jobData.running || []).some(r => r.name === job.name);
-            if (isRunning) {
+
+        // Check if this job is now running (from either manual or auto-retest)
+        const isRunning = (jobData.running || []).some(r => r.name === job.name);
+        if (isRunning) {
+            // Clean up tracking if this was a manually retested job
+            const retestInfo = retestedJobs.get(jobKey);
+            if (retestInfo) {
                 clearInterval(retestInfo.pollInterval);
                 retestedJobs.delete(jobKey);
-                return false;
             }
+            // Don't show in failed list if it's running
+            return false;
         }
+
         return true;
     });
 
