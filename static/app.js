@@ -324,13 +324,22 @@ async function checkJobStatesForAutoRetest(prKey) {
             // Handle already-failed jobs on first poll (previousState === undefined)
             if (previousState === undefined && currentState === 'failure') {
                 // This job is already failed when auto-retest was enabled
-                // Initialize counter to 1 and trigger retest
-                const count = 1;
-                jobFailureCounters.set(jobKey, count);
+                // Use the actual consecutive failure count from job.urls
+                const consecutiveFailures = job.urls?.length || 1;
+                jobFailureCounters.set(jobKey, consecutiveFailures);
 
-                console.log(`Found already-failed job ${job.name}, auto-retesting (attempt ${count})`);
-                await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
-                showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
+                console.log(`Found already-failed job ${job.name} with ${consecutiveFailures} consecutive failures`);
+
+                if (consecutiveFailures <= MAX_AUTO_RETEST_FAILURES) {
+                    // 1-2 failures: auto-retest immediately
+                    console.log(`Auto-retesting ${job.name} (attempt ${consecutiveFailures})`);
+                    await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+                    showToast(`🔄 Retesting ${job.name} (attempt ${consecutiveFailures})`, 'info');
+                } else if (consecutiveFailures >= PERMAFAIL_CHECK_THRESHOLD) {
+                    // 3+ failures: check permafail before retesting
+                    console.log(`Checking permafail for ${job.name} (${consecutiveFailures} consecutive failures)`);
+                    await checkPermafailBeforeRetest(owner, repo, number, job, prKey);
+                }
             }
             // Detect state transitions that result in failure: pending -> failure OR success -> failure
             else if ((previousState === 'pending' || previousState === 'success') && currentState === 'failure') {
