@@ -358,20 +358,45 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
             return;
         }
 
-        showToast(`Checking for permafail pattern on ${job.name}...`, 'info');
+        // First, check if we have a cached permafail result
+        showToast(`Checking permafail cache for ${job.name}...`, 'info');
+        const statusResponse = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify(jobUrls))}`);
+        const cachedStatus = await statusResponse.json();
 
-        const response = await fetch('/api/jobs/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                pr: `${owner}/${repo}#${number}`,
-                repo: `${owner}/${repo}`,
-                job_name: job.name,
-                job_urls: jobUrls
-            })
-        });
+        // Check if all URLs have cached results
+        const allCached = jobUrls.every(url => cachedStatus[url] !== undefined);
 
-        const result = await response.json();
+        let result;
+        if (allCached) {
+            // Use cached result - check if any URL is marked permafail
+            const anyPermafail = Object.values(cachedStatus).some(status => status.permafail && !status.override);
+            const permafailEntry = Object.values(cachedStatus).find(status => status.permafail && !status.override);
+
+            result = {
+                permafail: anyPermafail,
+                reason: anyPermafail ? permafailEntry.reason : 'Previously analyzed - no permafail pattern detected'
+            };
+
+            console.log(`Using cached permafail result for ${job.name}: ${result.permafail ? 'PERMAFAIL' : 'OK'}`);
+            showToast(`Using cached analysis for ${job.name}`, 'info');
+        } else {
+            // No cache, run fresh analysis
+            console.log(`No cached result for ${job.name}, running fresh analysis...`);
+            showToast(`Analyzing ${job.name} with AI (first time)...`, 'info');
+
+            const response = await fetch('/api/jobs/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pr: `${owner}/${repo}#${number}`,
+                    repo: `${owner}/${repo}`,
+                    job_name: job.name,
+                    job_urls: jobUrls
+                })
+            });
+
+            result = await response.json();
+        }
 
         if (result.permafail) {
             // Permafail detected - disable auto-retest for this PR
