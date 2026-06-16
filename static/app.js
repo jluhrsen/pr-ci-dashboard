@@ -35,7 +35,8 @@ const DOM = {
     loadMoreText: null,
     authBanner: null,
     prContainer: null,
-    toastContainer: null
+    toastContainer: null,
+    monitoredPrsList: null
 };
 
 // ========================================
@@ -55,9 +56,13 @@ async function init() {
     DOM.authBanner = document.getElementById('auth-banner');
     DOM.prContainer = document.getElementById('pr-cards-container');
     DOM.toastContainer = document.getElementById('toast-container');
+    DOM.monitoredPrsList = document.getElementById('monitored-prs-list');
 
     // Load auto-retest state from localStorage
     loadAutoRetestState();
+
+    // Update auto-retest monitor panel
+    updateAutoRetestMonitor();
 
     // Check auth status
     const authStatus = await checkAuth();
@@ -150,6 +155,10 @@ function loadAutoRetestState() {
             const parsed = JSON.parse(saved);
             Object.entries(parsed).forEach(([key, val]) => {
                 autoRetestEnabled.set(key, val);
+                // Start polling for all enabled PRs immediately on page load
+                if (val === true) {
+                    startPollingForPR(key);
+                }
             });
             console.log(`Loaded auto-retest state for ${Object.keys(parsed).length} PR(s)`);
         }
@@ -165,9 +174,77 @@ function saveAutoRetestState() {
             obj[key] = val;
         });
         localStorage.setItem('autoRetestEnabled', JSON.stringify(obj));
+        updateAutoRetestMonitor();
     } catch (error) {
         console.error('Failed to save auto-retest state:', error);
     }
+}
+
+function updateAutoRetestMonitor() {
+    if (!DOM.monitoredPrsList) return;
+
+    const monitoredPRs = Array.from(autoRetestEnabled.entries())
+        .filter(([key, enabled]) => enabled)
+        .map(([key]) => key);
+
+    if (monitoredPRs.length === 0) {
+        DOM.monitoredPrsList.innerHTML = '<div class="no-monitored-prs">No PRs monitored</div>';
+        return;
+    }
+
+    DOM.monitoredPrsList.innerHTML = '';
+    monitoredPRs.forEach(prKey => {
+        const [owner, repo, number] = prKey.split('/');
+        const item = createElement('div', 'monitored-pr-item');
+
+        const info = createElement('div', 'monitored-pr-info', `${owner}/${repo}#${number}`);
+
+        const actions = createElement('div', 'monitored-pr-actions');
+
+        const jumpBtn = createElement('button', 'monitored-pr-jump', 'Jump to PR');
+        jumpBtn.onclick = (e) => {
+            e.stopPropagation();
+            jumpToMonitoredPR(owner, repo, number);
+        };
+
+        const disableBtn = createElement('button', 'monitored-pr-disable', 'Disable');
+        disableBtn.onclick = (e) => {
+            e.stopPropagation();
+            disableMonitoredPR(prKey);
+        };
+
+        actions.appendChild(jumpBtn);
+        actions.appendChild(disableBtn);
+
+        item.appendChild(info);
+        item.appendChild(actions);
+
+        DOM.monitoredPrsList.appendChild(item);
+    });
+}
+
+function jumpToMonitoredPR(owner, repo, number) {
+    // Update search to show this specific PR
+    const query = `repo:${owner}/${repo} is:pr ${number}`;
+    DOM.searchInput.value = query;
+    currentPage = 1;
+    DOM.prContainer.innerHTML = '';
+    executeSearch(query);
+}
+
+function disableMonitoredPR(prKey) {
+    autoRetestEnabled.set(prKey, false);
+    saveAutoRetestState();
+    stopPollingForPR(prKey);
+
+    // Update toggle in UI if PR is visible
+    const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
+    if (toggleElement) {
+        toggleElement.checked = false;
+    }
+
+    const [owner, repo, number] = prKey.split('/');
+    showToast(`Auto-retest disabled for ${owner}/${repo}#${number}`, 'info');
 }
 
 function startPollingForPR(prKey) {

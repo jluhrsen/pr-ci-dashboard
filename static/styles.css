@@ -27,7 +27,7 @@ body {
 }
 
 .sidebar {
-    width: 200px;
+    width: 280px;
     background: var(--bg-card);
     border-right: 1px solid var(--border);
     padding: 1rem;
@@ -465,4 +465,91 @@ h1 {
     margin: 2px 0;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+/* Auto-Retest Monitor */
+.auto-retest-monitor {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.auto-retest-monitor h3 {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.monitored-prs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.no-monitored-prs {
+    color: var(--text-secondary);
+    font-size: 0.65rem;
+    font-style: italic;
+    padding: 0.25rem;
+}
+
+.monitored-pr-item {
+    background: var(--bg-light);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.35rem;
+    font-size: 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    transition: background 0.2s;
+    cursor: pointer;
+}
+
+.monitored-pr-item:hover {
+    background: #e8e8e8;
+}
+
+.monitored-pr-info {
+    font-weight: 600;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.monitored-pr-actions {
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.monitored-pr-jump {
+    font-size: 0.6rem;
+    padding: 0.15rem 0.3rem;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+    flex: 1;
+}
+
+.monitored-pr-jump:hover {
+    background: var(--primary-dark);
+}
+
+.monitored-pr-disable {
+    font-size: 0.6rem;
+    padding: 0.15rem 0.3rem;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.monitored-pr-disable:hover {
+    background: #c82333;
 }
