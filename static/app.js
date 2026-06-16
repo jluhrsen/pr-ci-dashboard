@@ -214,8 +214,19 @@ async function checkJobStatesForAutoRetest(prKey) {
             const currentState = job.state;
             const previousState = jobStateCache.get(jobKey);
 
+            // Handle already-failed jobs on first poll (previousState === undefined)
+            if (previousState === undefined && currentState === 'failure') {
+                // This job is already failed when auto-retest was enabled
+                // Initialize counter to 1 and trigger retest
+                const count = 1;
+                jobFailureCounters.set(jobKey, count);
+
+                console.log(`Found already-failed job ${job.name}, auto-retesting (attempt ${count})`);
+                await retestJob(owner, repo, number, [job.name], job.type || 'e2e');
+                showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
+            }
             // Detect state transition: success -> failure
-            if (previousState === 'success' && currentState === 'failure') {
+            else if (previousState === 'success' && currentState === 'failure') {
                 const count = (jobFailureCounters.get(jobKey) || 0) + 1;
                 jobFailureCounters.set(jobKey, count);
 
