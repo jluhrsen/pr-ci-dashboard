@@ -297,6 +297,25 @@ async function checkJobStatesForAutoRetest(prKey) {
         ];
         const allJobs = [...e2eJobs, ...payloadJobs];
 
+        // Track which jobs are in current response
+        const currentJobNames = new Set(allJobs.map(j => j.name));
+
+        // Check for jobs that disappeared (were running/pending, now gone = succeeded)
+        for (const [cachedKey, cachedState] of jobStateCache.entries()) {
+            // Only check jobs for this PR
+            if (!cachedKey.startsWith(`${prKey}/`)) continue;
+
+            const jobName = cachedKey.split('/').slice(3).join('/'); // Everything after owner/repo/number
+
+            // If job was pending/running and now disappeared, mark as success
+            if ((cachedState === 'pending' || cachedState === 'failure') && !currentJobNames.has(jobName)) {
+                jobStateCache.set(cachedKey, 'success');
+                // Reset failure counter when job succeeds
+                jobFailureCounters.delete(cachedKey);
+                console.log(`Job ${jobName} disappeared from response, marking as success`);
+            }
+        }
+
         for (const job of allJobs) {
             const jobKey = `${prKey}/${job.name}`;
             const currentState = job.state;
@@ -313,8 +332,8 @@ async function checkJobStatesForAutoRetest(prKey) {
                 await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
                 showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
             }
-            // Detect state transition: success -> failure
-            else if (previousState === 'success' && currentState === 'failure') {
+            // Detect state transitions that result in failure: pending -> failure OR success -> failure
+            else if ((previousState === 'pending' || previousState === 'success') && currentState === 'failure') {
                 const count = (jobFailureCounters.get(jobKey) || 0) + 1;
                 jobFailureCounters.set(jobKey, count);
 
