@@ -248,9 +248,12 @@ Return ONLY the final JSON result with no additional explanation."""
         )
 
         if result.returncode != 0:
+            error_msg = f"Skill execution failed: {result.stderr}"
+            print(f"[ERROR] {error_msg}")
+            print(f"[ERROR] stdout: {result.stdout[:500]}")
             return {
                 "permafail": False,
-                "error": f"Skill execution failed: {result.stderr}",
+                "error": error_msg,
                 "signatures": []
             }
 
@@ -258,9 +261,11 @@ Return ONLY the final JSON result with no additional explanation."""
         output = result.stdout.strip()
 
         if not output:
+            error_msg = "Skill returned empty output"
+            print(f"[ERROR] {error_msg} for job_name={job_name}")
             return {
                 "permafail": False,
-                "error": "Skill returned empty output",
+                "error": error_msg,
                 "signatures": []
             }
 
@@ -273,7 +278,9 @@ Return ONLY the final JSON result with no additional explanation."""
 
         # Try parsing as pure JSON first
         try:
-            return json.loads(output)
+            parsed_result = json.loads(output)
+            print(f"[DEBUG] AI analysis for {job_name}: permafail={parsed_result.get('permafail')}, reason={parsed_result.get('reason', '')[:100]}")
+            return parsed_result
         except json.JSONDecodeError:
             pass
 
@@ -281,31 +288,41 @@ Return ONLY the final JSON result with no additional explanation."""
         # Look for the last occurrence of a complete JSON object
         json_start = output.rfind('{')
         if json_start == -1:
+            error_msg = f"No JSON found in skill output. Output: {output[:200]}"
+            print(f"[ERROR] {error_msg}")
             return {
                 "permafail": False,
-                "error": f"No JSON found in skill output. Output: {output[:200]}",
+                "error": error_msg,
                 "signatures": []
             }
 
         json_str = output[json_start:]
         try:
-            return json.loads(json_str)
+            parsed_result = json.loads(json_str)
+            print(f"[DEBUG] AI analysis for {job_name}: permafail={parsed_result.get('permafail')}, reason={parsed_result.get('reason', '')[:100]}")
+            return parsed_result
         except json.JSONDecodeError as e:
+            error_msg = f"Failed to parse JSON from output: {e}. Output snippet: {output[:200]}"
+            print(f"[ERROR] {error_msg}")
             return {
                 "permafail": False,
-                "error": f"Failed to parse JSON from output: {e}. Output snippet: {output[:200]}",
+                "error": error_msg,
                 "signatures": []
             }
 
     except subprocess.TimeoutExpired:
+        error_msg = "Analysis timed out after 5 minutes"
+        print(f"[ERROR] {error_msg} for job_name={job_name}, pr={pr_info}")
         return {
             "permafail": False,
-            "error": "Analysis timed out after 5 minutes",
+            "error": error_msg,
             "signatures": []
         }
     except Exception as e:
+        error_msg = f"Unexpected error: {e}"
+        print(f"[ERROR] {error_msg} for job_name={job_name}, pr={pr_info}")
         return {
             "permafail": False,
-            "error": f"Unexpected error: {e}",
+            "error": error_msg,
             "signatures": []
         }

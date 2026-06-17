@@ -343,7 +343,7 @@ async function checkJobStatesForAutoRetest(prKey) {
 
                 if (count <= MAX_AUTO_RETEST_FAILURES) {
                     jobsToRetestImmediately.push({ job, count });
-                } else if (count === PERMAFAIL_CHECK_THRESHOLD) {
+                } else if (count >= PERMAFAIL_CHECK_THRESHOLD) {
                     jobsNeedingPermafailCheck.push({ job, count });
                 }
             }
@@ -354,6 +354,15 @@ async function checkJobStatesForAutoRetest(prKey) {
 
         // Process immediate retests (no permafail check needed)
         for (const { job, count } of jobsToRetestImmediately) {
+            const jobKey = `${prKey}/${job.name}`;
+
+            // Skip if already marked as permafail
+            const permafailStatus = permafailJobs.get(jobKey);
+            if (permafailStatus && permafailStatus.permafail && !permafailStatus.override) {
+                console.log(`Skipping auto-retest for ${job.name} - marked as permafail`);
+                continue;
+            }
+
             console.log(`Auto-retesting ${job.name} (attempt ${count})`);
             await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
             showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
@@ -361,7 +370,22 @@ async function checkJobStatesForAutoRetest(prKey) {
 
         // Process permafail checks in batches of 2 with progress indicator
         if (jobsNeedingPermafailCheck.length > 0) {
-            await processPermafailChecks(owner, repo, number, prKey, jobsNeedingPermafailCheck);
+            // Filter out jobs already marked as permafail (avoid re-checking)
+            const jobsToCheck = jobsNeedingPermafailCheck.filter(({ job }) => {
+                const jobKey = `${prKey}/${job.name}`;
+                const permafailStatus = permafailJobs.get(jobKey);
+                const isAlreadyPermafail = permafailStatus && permafailStatus.permafail && !permafailStatus.override;
+
+                if (isAlreadyPermafail) {
+                    console.log(`Skipping permafail check for ${job.name} - already marked as permafail`);
+                }
+
+                return !isAlreadyPermafail;
+            });
+
+            if (jobsToCheck.length > 0) {
+                await processPermafailChecks(owner, repo, number, prKey, jobsToCheck);
+            }
         }
 
         // Update UI to reflect any state changes (e.g., failed -> running after retest)
@@ -371,6 +395,59 @@ async function checkJobStatesForAutoRetest(prKey) {
         }
     } catch (error) {
         console.error(`Error checking job states for ${prKey}:`, error);
+    }
+}
+
+async function checkIfAllFailingJobsArePermafail(prKey) {
+    const [owner, repo, number] = prKey.split('/');
+
+    try {
+        // Fetch current PR jobs
+        const response = await fetch(`/api/pr/${owner}/${repo}/${number}`);
+        if (!response.ok) {
+            console.error(`Failed to fetch jobs for ${prKey}`);
+            return false;
+        }
+
+        const data = await response.json();
+
+        // Get all failed AND running jobs (running jobs might fail and need retest)
+        const failedJobs = [
+            ...(data.e2e?.failed || []),
+            ...(data.payload?.failed || [])
+        ];
+        const runningJobs = [
+            ...(data.e2e?.running || []),
+            ...(data.payload?.running || [])
+        ];
+
+        // If there are running jobs, don't disable - they might fail and need retest
+        if (runningJobs.length > 0) {
+            console.log(`${runningJobs.length} jobs still running, keeping auto-retest enabled`);
+            return false;
+        }
+
+        // If no failed jobs at all, return false (nothing to disable)
+        if (failedJobs.length === 0) {
+            return false;
+        }
+
+        // Check if ALL failed jobs are marked as permafail
+        for (const job of failedJobs) {
+            const jobKey = `${prKey}/${job.name}`;
+            const permafailStatus = permafailJobs.get(jobKey);
+
+            // If job is NOT marked permafail or is overridden, return false
+            if (!permafailStatus || !permafailStatus.permafail || permafailStatus.override) {
+                return false;
+            }
+        }
+
+        // All failed jobs are permafails AND no running jobs
+        return true;
+    } catch (error) {
+        console.error(`Error checking if all jobs are permafail for ${prKey}:`, error);
+        return false;
     }
 }
 
@@ -384,12 +461,6 @@ async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck) {
 
     // Process in batches of 2
     for (let i = 0; i < jobsToCheck.length; i += 2) {
-        // Stop early if auto-retest was disabled by previous permafail
-        if (!autoRetestEnabled.get(prKey)) {
-            console.log(`Auto-retest disabled for ${prKey}, stopping permafail checks`);
-            break;
-        }
-
         const batch = jobsToCheck.slice(i, i + 2);
 
         // Run up to 2 checks in parallel
@@ -405,11 +476,26 @@ async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck) {
     // Remove progress toast
     removeToast(progressToastId);
 
-    // Show completion message
-    if (completed === totalJobs) {
-        showToast(`✅ Completed permafail analysis for ${totalJobs} jobs`, 'success');
+    // Check if ALL failing jobs are now marked as permafail
+    const allFailingJobsPermafail = await checkIfAllFailingJobsArePermafail(prKey);
+
+    if (allFailingJobsPermafail) {
+        // Disable auto-retest since all failing jobs are permafails
+        autoRetestEnabled.set(prKey, false);
+        saveAutoRetestState();
+        stopPollingForPR(prKey);
+
+        // Update UI toggle
+        const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
+        if (toggleElement) {
+            toggleElement.checked = false;
+            toggleElement.disabled = true;
+        }
+
+        showToast(`⚠️ All failing jobs are permafails - auto-retest disabled for PR #${number}`, 'error');
+        console.log(`Disabled auto-retest for ${prKey} - all failing jobs are permafails`);
     } else {
-        showToast(`⚠️ Stopped after ${completed}/${totalJobs} jobs (auto-retest disabled)`, 'info');
+        showToast(`✅ Completed permafail analysis for ${totalJobs} jobs`, 'success');
     }
 }
 
@@ -465,21 +551,20 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
             result = await response.json();
         }
 
-        if (result.permafail) {
-            // Permafail detected - disable auto-retest for this PR
-            autoRetestEnabled.set(prKey, false);
-            saveAutoRetestState();
-            stopPollingForPR(prKey);
+        const jobKey = `${prKey}/${job.name}`;
 
-            // Update UI toggle
-            const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
-            if (toggleElement) {
-                toggleElement.checked = false;
-                toggleElement.disabled = true;
-            }
+        if (result.permafail) {
+            // Mark job as permafail (don't disable auto-retest for entire PR yet)
+            permafailJobs.set(jobKey, {
+                permafail: true,
+                reason: result.reason,
+                override: false
+            });
 
             showToast(`⚠️ Permafail detected on ${job.name}: ${result.reason}`, 'error');
-            console.log(`Disabled auto-retest for ${prKey} due to permafail`);
+            console.log(`Marked ${job.name} as permafail (auto-retest will continue for other jobs)`);
+
+            // Skip retesting this job
         } else {
             // Not a permafail - proceed with retest (skip tracking since this is auto-retest)
             console.log(`No permafail detected on ${job.name}, retesting...`);

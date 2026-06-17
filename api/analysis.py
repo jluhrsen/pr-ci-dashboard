@@ -62,7 +62,17 @@ def analyze_job():
             data["pr"]
         )
 
-        # Cache results for each URL (for both success and error cases)
+        # Check if AI analyzer returned an error
+        if "error" in result:
+            print(f"[DEBUG] AI analysis failed: {result.get('error')}")
+            print(f"[DEBUG] NOT caching error result to allow retry")
+            return jsonify({
+                "permafail": False,
+                "reason": "Analysis unavailable, manual check needed",
+                "error": result["error"]
+            })
+
+        # Cache successful results only (don't cache errors)
         db_path = current_app.config.get('DB_PATH')
         for i, url in enumerate(data["job_urls"]):
             signature = result.get("signatures", [])[i] if i < len(result.get("signatures", [])) else {}
@@ -75,14 +85,6 @@ def analyze_job():
                 permafail_result=result,
                 db_path=db_path
             )
-
-        # Check if AI analyzer returned an error
-        if "error" in result:
-            return jsonify({
-                "permafail": False,
-                "reason": "Analysis unavailable, manual check needed",
-                "error": result["error"]
-            })
 
         return jsonify({
             "permafail": result.get("permafail", False),
@@ -158,8 +160,8 @@ def analyze_job_stream():
                 # Send as SSE event
                 yield f"data: {event_json}\n\n"
 
-            # Cache results if we got a final result
-            if final_result:
+            # Cache results if we got a final result (but skip errors)
+            if final_result and "error" not in final_result:
                 for i, url in enumerate(data["job_urls"]):
                     signature = final_result.get("signatures", [])[i] if i < len(final_result.get("signatures", [])) else {}
                     store_analysis(
