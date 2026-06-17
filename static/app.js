@@ -752,7 +752,8 @@ async function loadCachedPermafailResults(list, failedJobs) {
     const jobUrls = [];
     failedJobs.forEach(job => {
         if (job.urls && job.urls.length > 0) {
-            jobUrls.push(job.urls[0]);
+            // Push ALL URLs to check if any are cached as permafail
+            jobUrls.push(...job.urls);
         }
     });
 
