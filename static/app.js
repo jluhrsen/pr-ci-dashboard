@@ -726,7 +726,7 @@ function isJobRetesting(owner, repo, number, jobName) {
     return retestedJobs.has(jobKey);
 }
 
-function renderPermafailIcon(jobElement, reason) {
+function renderPermafailIcon(jobElement, reason, fullResult = null) {
     const jobHeader = jobElement.querySelector('.job-name') || jobElement;
 
     // Remove existing icon if present
@@ -739,7 +739,7 @@ function renderPermafailIcon(jobElement, reason) {
     icon.className = 'permafail-icon';
     icon.alt = 'Permafail detected';
     icon.title = 'Click to view permafail details';
-    icon.onclick = () => showPermafailModal(reason);
+    icon.onclick = () => showPermafailModal(reason, true, fullResult);
     jobHeader.appendChild(icon);
 
     // Disable retest button
@@ -749,7 +749,7 @@ function renderPermafailIcon(jobElement, reason) {
     }
 }
 
-function renderNonPermafailInfo(jobElement, reason) {
+function renderNonPermafailInfo(jobElement, reason, fullResult = null) {
     const jobHeader = jobElement.querySelector('.job-name') || jobElement;
 
     // Remove existing info icon if present
@@ -764,11 +764,11 @@ function renderNonPermafailInfo(jobElement, reason) {
     icon.style.cursor = 'pointer';
     icon.style.marginLeft = '8px';
     icon.style.fontSize = '16px';
-    icon.onclick = () => showPermafailModal(reason, false);
+    icon.onclick = () => showPermafailModal(reason, false, fullResult);
     jobHeader.appendChild(icon);
 }
 
-function showPermafailModal(reason, isPermafail = true) {
+function showPermafailModal(reason, isPermafail = true, fullResult = null) {
     // Create modal if it doesn't exist
     let modal = document.getElementById('permafail-modal');
     if (!modal) {
@@ -824,9 +824,28 @@ function showPermafailModal(reason, isPermafail = true) {
         header.style.color = '#28a745';
     }
 
-    // Update modal content and show (defensive fallback for blank reason)
-    const displayReason = reason || "No analysis details available";
-    modal.querySelector('.permafail-modal-body').textContent = displayReason;
+    // Update modal content and show
+    const bodyElement = modal.querySelector('.permafail-modal-body');
+
+    if (fullResult) {
+        // Show formatted JSON with syntax highlighting
+        const displayReason = reason || "No analysis details available";
+        bodyElement.innerHTML = `
+            <div style="margin-bottom: 16px;">
+                <strong>Summary:</strong><br>
+                ${displayReason}
+            </div>
+            <div>
+                <strong>Full Analysis Result:</strong>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; max-height: 400px;">${JSON.stringify(fullResult, null, 2)}</pre>
+            </div>
+        `;
+    } else {
+        // Fallback to reason only (defensive fallback for blank reason)
+        const displayReason = reason || "No analysis details available";
+        bodyElement.textContent = displayReason;
+    }
+
     modal.style.display = 'block';
 
     // Add escape key listener
@@ -898,7 +917,7 @@ async function loadCachedPermafailResults(list, failedJobs) {
                     const jobName = jobElement.dataset.jobName;
                     const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
 
-                    renderPermafailIcon(jobElement, result.reason);
+                    renderPermafailIcon(jobElement, result.reason, result);
                     setPermafailJobState(jobKey, result, [url]);
 
                     // Disable "Check for Permafail" button since we have a cached permafail
@@ -1086,7 +1105,7 @@ async function handleForceReanalyze() {
 
         if (result.permafail) {
             // Mark as permafail with fresh analysis
-            renderPermafailIcon(jobElement, result.reason);
+            renderPermafailIcon(jobElement, result.reason, result);
             setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
             if (checkPermafailBtn) {
                 checkPermafailBtn.disabled = true;
@@ -1096,7 +1115,7 @@ async function handleForceReanalyze() {
         } else {
             // No permafail detected - store result and show info icon
             setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
-            renderNonPermafailInfo(jobElement, result.reason);
+            renderNonPermafailInfo(jobElement, result.reason, result);
             if (checkPermafailBtn) {
                 checkPermafailBtn.textContent = 'No permafail detected';
                 checkPermafailBtn.disabled = false;
@@ -1369,7 +1388,7 @@ function renderJobItems(list, failedJobs, owner, repo, number, jobType) {
         // Apply cached permafail state from Map if present
         const permafailStatus = permafailJobs.get(jobKey);
         if (permafailStatus && permafailStatus.permafail && !permafailStatus.override) {
-            renderPermafailIcon(jobItem, permafailStatus.reason);
+            renderPermafailIcon(jobItem, permafailStatus.reason, permafailStatus);
             // Disable "Check for Permafail" button since we already know it's permafail
             const checkBtn = jobItem.querySelector('.check-permafail-btn');
             if (checkBtn) {
@@ -1521,7 +1540,7 @@ async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
                 // Mark as permafail, disable retest
                 const jobElement = document.querySelector(`[data-job-url="${jobUrls[0]}"]`);
                 if (jobElement) {
-                    renderPermafailIcon(jobElement, result.reason);
+                    renderPermafailIcon(jobElement, result.reason, result);
                     setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
                 }
                 return; // Don't retest
@@ -1583,7 +1602,7 @@ async function manualPermafailCheck(jobElement, buttonElement) {
             if (permafailUrl) {
                 // We have a cached permafail result - use it
                 const cachedResult = statusData[permafailUrl];
-                renderPermafailIcon(jobElement, cachedResult.reason);
+                renderPermafailIcon(jobElement, cachedResult.reason, cachedResult);
                 // Collect all URLs that have cached permafail results
                 const permafailUrls = jobUrls.filter(url => {
                     const result = statusData[url];
@@ -1606,7 +1625,7 @@ async function manualPermafailCheck(jobElement, buttonElement) {
                 // All URLs cached and all non-permafail - show it with info icon
                 const cachedResult = statusData[jobUrls[0]];
                 setPermafailJobState(jobKey, cachedResult, jobUrls);
-                renderNonPermafailInfo(jobElement, cachedResult.reason);
+                renderNonPermafailInfo(jobElement, cachedResult.reason, cachedResult);
                 buttonElement.textContent = 'No permafail (cached)';
                 setTimeout(() => {
                     buttonElement.textContent = 'Check for Permafail';
@@ -1639,14 +1658,14 @@ async function manualPermafailCheck(jobElement, buttonElement) {
 
         if (result.permafail) {
             // Mark as permafail
-            renderPermafailIcon(jobElement, result.reason);
+            renderPermafailIcon(jobElement, result.reason, result);
             setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
             buttonElement.style.display = 'none';
             showToast('Permafail detected: ' + result.reason, 'error');
         } else {
             // No permafail detected - store result and show info icon
             setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
-            renderNonPermafailInfo(jobElement, result.reason);
+            renderNonPermafailInfo(jobElement, result.reason, result);
             buttonElement.textContent = 'No permafail detected';
             setTimeout(() => {
                 buttonElement.textContent = 'Check for Permafail';
