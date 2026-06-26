@@ -180,6 +180,37 @@ function saveAutoRetestState() {
     }
 }
 
+async function loadPRPermafails(owner, repo, number) {
+    /**
+     * Load permafail status for a PR from the database
+     * Populates the permafailJobs Map with job_name-based entries
+     */
+    try {
+        const response = await fetch(`/api/pr/${owner}/${repo}/${number}/permafails`);
+        if (!response.ok) {
+            console.error(`Failed to load permafails for ${owner}/${repo}#${number}:`, response.status);
+            return;
+        }
+
+        const permafails = await response.json();
+        const prKey = `${owner}/${repo}/${number}`;
+
+        // Populate permafailJobs Map
+        for (const [jobName, data] of Object.entries(permafails)) {
+            const jobKey = `${prKey}/${jobName}`;
+            permafailJobs.set(jobKey, {
+                permafail: data.permafail,
+                reason: data.reason,
+                override: data.override
+            });
+        }
+
+        console.log(`Loaded ${Object.keys(permafails).length} permafail job(s) for ${owner}/${repo}#${number}`);
+    } catch (error) {
+        console.error(`Error loading permafails for ${owner}/${repo}#${number}:`, error);
+    }
+}
+
 function updateAutoRetestMonitor() {
     if (!DOM.monitoredPrsList) return;
 
@@ -1132,6 +1163,9 @@ function createJobSectionPlaceholder(type, owner, repo, number) {
 // ========================================
 async function loadPRJobs(owner, repo, number, cardElement) {
     try {
+        // Load permafails first to populate the Map before rendering
+        await loadPRPermafails(owner, repo, number);
+
         const response = await fetch(`/api/pr/${owner}/${repo}/${number}`);
         const data = await response.json();
         updateCardWithJobs(cardElement, data, owner, repo, number);
@@ -1226,6 +1260,18 @@ function renderJobItems(list, failedJobs, owner, repo, number, jobType) {
 
         const jobKey = `${owner}/${repo}/${number}/${job.name}`;
         attachJobCardEvents(jobItem, jobKey);
+
+        // Apply cached permafail state from Map if present
+        const permafailStatus = permafailJobs.get(jobKey);
+        if (permafailStatus && permafailStatus.permafail && !permafailStatus.override) {
+            renderPermafailIcon(jobItem, permafailStatus.reason);
+            // Disable "Check for Permafail" button since we already know it's permafail
+            const checkBtn = jobItem.querySelector('.check-permafail-btn');
+            if (checkBtn) {
+                checkBtn.disabled = true;
+                checkBtn.textContent = 'Permafail (cached)';
+            }
+        }
 
         list.appendChild(jobItem);
     });

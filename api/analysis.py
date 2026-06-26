@@ -1,7 +1,7 @@
 # api/analysis.py
 import json
 from flask import Blueprint, request, jsonify, current_app, Response
-from utils.db import store_analysis, get_permafail_status, set_override, delete_cached_analyses
+from utils.db import store_analysis, get_permafail_status, get_pr_permafail_status, set_override, delete_cached_analyses
 from utils.ai_analyzer import analyze_permafail, analyze_permafail_streaming
 
 analysis_bp = Blueprint('analysis', __name__)
@@ -276,4 +276,30 @@ def get_job_status():
 
     except Exception as e:
         print(f"[DEBUG] Cache check failed: {str(e)}")
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/pr/<owner>/<repo>/<int:number>/permafails', methods=['GET'])
+def get_pr_permafails(owner, repo, number):
+    """
+    Get all permafail jobs for a PR
+
+    Response: {
+        "job_name1": {"permafail": true, "reason": str, "override": false, "job_urls": [...]},
+        "job_name2": {...},
+        ...
+    }
+    """
+    try:
+        db_path = current_app.config.get('DB_PATH')
+        repo_full = f"{owner}/{repo}"
+
+        print(f"[DEBUG] Fetching permafails for {repo_full}#{number}")
+        jobs = get_pr_permafail_status(repo_full, number, db_path=db_path)
+        print(f"[DEBUG] Found {len(jobs)} permafail job(s)")
+
+        return jsonify(jobs)
+
+    except Exception as e:
+        print(f"[DEBUG] Get PR permafails failed: {str(e)}")
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500

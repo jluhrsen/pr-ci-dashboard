@@ -2,7 +2,7 @@ import pytest
 import sqlite3
 import os
 import json
-from utils.db import init_db, store_analysis, get_permafail_status, clear_override
+from utils.db import init_db, store_analysis, get_permafail_status, get_pr_permafail_status, clear_override
 
 def test_init_db_creates_tables(tmp_path):
     """Test that init_db creates job_analyses table with correct schema"""
@@ -456,3 +456,152 @@ def test_clear_override_resets_flag(tmp_path):
     finally:
         if conn:
             conn.close()
+
+
+def test_get_pr_permafail_status_groups_by_job_name(tmp_path):
+    """Test that get_pr_permafail_status groups multiple URLs by job_name"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    # Store multiple failures for same job
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/123",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={"type": "test_failure"},
+        permafail_result={"permafail": True, "reason": "Flaky test"},
+        db_path=str(db_path)
+    )
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/456",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={"type": "test_failure"},
+        permafail_result={"permafail": True, "reason": "Flaky test"},
+        db_path=str(db_path)
+    )
+
+    result = get_pr_permafail_status("openshift/ovn-kubernetes", 1234, str(db_path))
+
+    assert len(result) == 1
+    assert "e2e-aws-ovn" in result
+    assert result["e2e-aws-ovn"]["permafail"] is True
+    assert result["e2e-aws-ovn"]["reason"] == "Flaky test"
+    assert len(result["e2e-aws-ovn"]["job_urls"]) == 2
+
+
+def test_get_pr_permafail_status_excludes_non_permafail(tmp_path):
+    """Test that get_pr_permafail_status only returns permafail=True jobs"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    # Store permafail
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/123",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Flaky"},
+        db_path=str(db_path)
+    )
+
+    # Store non-permafail
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/456",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-metal-ipi",
+        signature={},
+        permafail_result={"permafail": False, "reason": "OK"},
+        db_path=str(db_path)
+    )
+
+    result = get_pr_permafail_status("openshift/ovn-kubernetes", 1234, str(db_path))
+
+    # Only permafail job should be returned
+    assert len(result) == 1
+    assert "e2e-aws-ovn" in result
+    assert "e2e-metal-ipi" not in result
+
+
+def test_get_pr_permafail_status_excludes_override(tmp_path):
+    """Test that get_pr_permafail_status excludes jobs with override=1"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    job_url = "https://prow.ci.openshift.org/view/gs/123"
+
+    # Store permafail
+    store_analysis(
+        job_url=job_url,
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Flaky"},
+        db_path=str(db_path)
+    )
+
+    # Set override
+    conn = None
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("UPDATE job_analyses SET override = 1 WHERE job_url = ?", (job_url,))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+
+    result = get_pr_permafail_status("openshift/ovn-kubernetes", 1234, str(db_path))
+
+    # Should be empty because override=1
+    assert len(result) == 0
+
+
+def test_get_pr_permafail_status_filters_by_pr(tmp_path):
+    """Test that get_pr_permafail_status only returns jobs for the specified PR"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    # Store permafail for PR 1234
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/123",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Flaky"},
+        db_path=str(db_path)
+    )
+
+    # Store permafail for PR 5678
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/456",
+        pr_number=5678,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-metal-ipi",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Timeout"},
+        db_path=str(db_path)
+    )
+
+    result = get_pr_permafail_status("openshift/ovn-kubernetes", 1234, str(db_path))
+
+    # Should only return PR 1234's job
+    assert len(result) == 1
+    assert "e2e-aws-ovn" in result
+    assert "e2e-metal-ipi" not in result
+
+
+def test_get_pr_permafail_status_empty_for_no_results(tmp_path):
+    """Test that get_pr_permafail_status returns empty dict when no permafails exist"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    result = get_pr_permafail_status("openshift/ovn-kubernetes", 1234, str(db_path))
+
+    assert result == {}

@@ -331,3 +331,99 @@ def test_status_endpoint_database_failure(client):
     data = json.loads(response.data)
     assert "error" in data
     assert "Internal server error" in data["error"]
+
+
+def test_pr_permafails_endpoint_returns_grouped_jobs(client):
+    """Test GET /api/pr/<owner>/<repo>/<number>/permafails returns grouped permafails"""
+    from utils.db import store_analysis
+
+    db_path = client.application.config['DB_PATH']
+
+    # Store permafails for PR 1234
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/1",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Flaky test"},
+        db_path=db_path
+    )
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/2",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Flaky test"},
+        db_path=db_path
+    )
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/3",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-metal-ipi",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Timeout"},
+        db_path=db_path
+    )
+
+    response = client.get('/api/pr/openshift/ovn-kubernetes/1234/permafails')
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+
+    assert len(data) == 2
+    assert "e2e-aws-ovn" in data
+    assert "e2e-metal-ipi" in data
+    assert data["e2e-aws-ovn"]["permafail"] is True
+    assert data["e2e-aws-ovn"]["reason"] == "Flaky test"
+    assert len(data["e2e-aws-ovn"]["job_urls"]) == 2
+
+
+def test_pr_permafails_endpoint_empty_when_no_permafails(client):
+    """Test GET /api/pr/<owner>/<repo>/<number>/permafails returns empty dict when no permafails"""
+    response = client.get('/api/pr/openshift/ovn-kubernetes/9999/permafails')
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data == {}
+
+
+def test_pr_permafails_endpoint_filters_by_pr(client):
+    """Test GET /api/pr/<owner>/<repo>/<number>/permafails only returns jobs for specified PR"""
+    from utils.db import store_analysis
+
+    db_path = client.application.config['DB_PATH']
+
+    # Store permafail for PR 1234
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/1",
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Flaky"},
+        db_path=db_path
+    )
+
+    # Store permafail for PR 5678
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/2",
+        pr_number=5678,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-metal-ipi",
+        signature={},
+        permafail_result={"permafail": True, "reason": "Timeout"},
+        db_path=db_path
+    )
+
+    response = client.get('/api/pr/openshift/ovn-kubernetes/1234/permafails')
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+
+    # Should only return PR 1234's jobs
+    assert len(data) == 1
+    assert "e2e-aws-ovn" in data
+    assert "e2e-metal-ipi" not in data

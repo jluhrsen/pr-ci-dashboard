@@ -149,6 +149,69 @@ def get_permafail_status(job_urls, db_path=None):
             conn.close()
 
 
+def get_pr_permafail_status(repo, pr_number, db_path=None):
+    """
+    Get permafail status for all jobs in a PR
+
+    Args:
+        repo: Repository (e.g., "openshift/ovn-kubernetes")
+        pr_number: PR number
+        db_path: Optional database path (defaults to DB_PATH)
+
+    Returns:
+        dict: Map of job_name -> {permafail: bool, reason: str, override: bool, job_urls: list}
+              Groups all URLs for the same job_name together
+              Only includes jobs that have at least one cached permafail=True result
+
+    Raises:
+        RuntimeError: If database operation fails
+    """
+    path = db_path or DB_PATH
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+
+        # Query all analyses for this PR
+        query = """
+            SELECT job_name, job_url, permafail_result, override
+            FROM job_analyses
+            WHERE repo = ? AND pr_number = ?
+        """
+
+        cursor.execute(query, (repo, pr_number))
+        rows = cursor.fetchall()
+
+        # Group by job_name
+        jobs = {}
+        for row in rows:
+            job_name = row[0]
+            job_url = row[1]
+            try:
+                permafail_result = json.loads(row[2])
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"Invalid JSON in database for job {job_url}: {e}")
+            override = bool(row[3])
+
+            # Only include if permafail=True (ignore non-permafail cached results)
+            if permafail_result.get("permafail", False) and not override:
+                if job_name not in jobs:
+                    jobs[job_name] = {
+                        "permafail": True,
+                        "reason": permafail_result.get("reason", ""),
+                        "override": False,
+                        "job_urls": []
+                    }
+                jobs[job_name]["job_urls"].append(job_url)
+
+        return jobs
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to get PR permafail status: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
 def set_override(job_url, db_path=None):
     """
     Set override flag for a job URL to mark it as acknowledged/overridden
