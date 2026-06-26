@@ -10,21 +10,78 @@ DB_PATH = os.environ.get('PR_CI_DASHBOARD_DB',
 
 
 def is_permafail_result(permafail_result):
-    """Return the permafail verdict from current or legacy analysis result shapes."""
+    """Return the permafail verdict from current or legacy analysis result shapes.
+
+    Handles multiple schema formats:
+    - {permafail: bool, ...}
+    - {is_permafail: bool, ...}
+    - {verdict: "PERMAFAIL"|"NOT_PERMAFAIL", ...}
+    """
     if not isinstance(permafail_result, dict):
         return False
+
+    # Check verdict field first (semantic truth)
+    verdict = permafail_result.get("verdict")
+    if isinstance(verdict, str):
+        if verdict.upper() in ("PERMAFAIL", "PERM"):
+            return True
+        if verdict.upper() in ("NOT_PERMAFAIL", "NOT PERMAFAIL", "OK", "PASS"):
+            return False
+
+    # Fall back to boolean flags
     if "permafail" in permafail_result:
         return bool(permafail_result.get("permafail"))
     return bool(permafail_result.get("is_permafail", False))
 
 
 def normalize_permafail_result(permafail_result):
-    """Ensure analysis result dicts always expose the UI/API `permafail` key."""
+    """Ensure analysis result dicts always expose the UI/API `permafail` key and reason.
+
+    Synthesizes a reason if missing but verdict indicates permafail.
+    """
     if not isinstance(permafail_result, dict):
         return {"permafail": False, "reason": ""}
 
     normalized = dict(permafail_result)
     normalized["permafail"] = is_permafail_result(permafail_result)
+
+    # Synthesize reason if missing and result is permafail
+    if normalized["permafail"] and not normalized.get("reason"):
+        parts = []
+
+        # Include verdict
+        verdict = normalized.get("verdict")
+        if verdict:
+            parts.append(f"Verdict: {verdict}")
+
+        # Include match statistics
+        matching = normalized.get("matching_runs")
+        comparable = normalized.get("comparable_runs")
+        if matching is not None and comparable is not None:
+            parts.append(f"{matching}/{comparable} runs matched")
+
+        # Include confidence
+        confidence = normalized.get("confidence")
+        if confidence is not None:
+            try:
+                parts.append(f"Confidence: {float(confidence):.0%}")
+            except (TypeError, ValueError):
+                parts.append(f"Confidence: {confidence}")
+
+        # Include failure type
+        failure_type = normalized.get("failure_type")
+        if failure_type:
+            parts.append(f"Type: {failure_type}")
+
+        # Include common tests or signature
+        common_tests = normalized.get("all_common_tests")
+        if common_tests and isinstance(common_tests, list) and len(common_tests) > 0:
+            parts.append(f"Common test(s): {', '.join(common_tests[:3])}")
+        elif "common_signature" in normalized:
+            parts.append("Common signature detected")
+
+        normalized["reason"] = "; ".join(parts) if parts else "Permafail detected (no details available)"
+
     return normalized
 
 
@@ -157,6 +214,7 @@ def get_permafail_status(job_urls, db_path=None):
                 permafail_result = json.loads(row[1])
             except json.JSONDecodeError as e:
                 raise RuntimeError(f"Invalid JSON in database for job {job_url}: {e}")
+            permafail_result = normalize_permafail_result(permafail_result)
             override = bool(row[2])
 
             result[job_url] = {
@@ -215,6 +273,7 @@ def get_pr_permafail_status(repo, pr_number, db_path=None):
                 permafail_result = json.loads(row[2])
             except json.JSONDecodeError as e:
                 raise RuntimeError(f"Invalid JSON in database for job {job_url}: {e}")
+            permafail_result = normalize_permafail_result(permafail_result)
             override = bool(row[3])
 
             # Only include if permafail=True (ignore non-permafail cached results)

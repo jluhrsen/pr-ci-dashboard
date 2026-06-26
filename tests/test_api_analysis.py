@@ -96,6 +96,49 @@ def test_analyze_endpoint_normalizes_is_permafail_result(client, tmp_path):
     assert cached[request_data["job_urls"][0]]["permafail"] is True
 
 
+def test_analyze_endpoint_normalizes_verdict_permafail_result(client, tmp_path):
+    """Test POST /api/jobs/analyze normalizes analyzer verdict output"""
+    request_data = {
+        "pr": "openshift/ovn-kubernetes#3243",
+        "repo": "openshift/ovn-kubernetes",
+        "job_name": "e2e-aws-ovn-local-gateway",
+        "job_urls": [
+            "https://prow.ci.openshift.org/view/1",
+            "https://prow.ci.openshift.org/view/2",
+            "https://prow.ci.openshift.org/view/3"
+        ]
+    }
+
+    mock_analysis = {
+        "permafail": False,
+        "verdict": "PERMAFAIL",
+        "confidence": 1.0,
+        "matching_runs": 3,
+        "comparable_runs": 3,
+        "failure_type": "test_failure",
+        "all_common_tests": ["TestA"],
+        "signatures": [{}, {}, {}]
+    }
+
+    with patch('api.analysis.analyze_permafail', return_value=mock_analysis):
+        response = client.post(
+            '/api/jobs/analyze',
+            data=json.dumps(request_data),
+            content_type='application/json'
+        )
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data["permafail"] is True
+    assert "PERMAFAIL" in data["reason"]
+    assert "3/3" in data["reason"]
+
+    from utils.db import get_permafail_status
+    cached = get_permafail_status(request_data["job_urls"], db_path=str(tmp_path / "test.db"))
+    assert cached[request_data["job_urls"][0]]["permafail"] is True
+    assert "PERMAFAIL" in cached[request_data["job_urls"][0]]["reason"]
+
+
 def test_analyze_endpoint_invalid_json(client):
     """Test endpoint rejects invalid JSON"""
     response = client.post(

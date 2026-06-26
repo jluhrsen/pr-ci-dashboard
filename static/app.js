@@ -824,8 +824,9 @@ function showPermafailModal(reason, isPermafail = true) {
         header.style.color = '#28a745';
     }
 
-    // Update modal content and show
-    modal.querySelector('.permafail-modal-body').textContent = reason;
+    // Update modal content and show (defensive fallback for blank reason)
+    const displayReason = reason || "No analysis details available";
+    modal.querySelector('.permafail-modal-body').textContent = displayReason;
     modal.style.display = 'block';
 
     // Add escape key listener

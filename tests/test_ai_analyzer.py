@@ -39,23 +39,19 @@ def test_analyze_permafail_success():
         # Verify command arguments
         assert args[0] == 'claude'
         assert args[1] == '--allowedTools'
-        assert args[2] == 'WebFetch,Bash'
+        assert args[2] == 'Skill,WebFetch,Bash'
         assert args[3] == '--print'
 
         # Verify prompt was passed via stdin
         assert 'input' in kwargs
         prompt = kwargs['input']
-        # Verify skill definitions are included
-        assert 'detect-permafail' in prompt
-        assert 'ci-prow-navigation' in prompt
-        assert '---SKILL---' in prompt
-        assert '---TASK---' in prompt
+        # Verify skill command is requested
+        assert '/ci:detect-permafail' in prompt
         # Verify parameters
         assert json.dumps(job_urls) in prompt
         assert job_name in prompt
         assert pr_info in prompt
-        # Verify instruction to not use Skill tool
-        assert 'Do NOT use the Skill tool' in prompt
+        assert 'Return ONLY the final JSON result' in prompt
 
         # Verify result
         assert result["permafail"] is True

@@ -655,3 +655,70 @@ def test_get_pr_permafail_status_supports_legacy_is_permafail_key(tmp_path):
     assert "e2e-aws-ovn" in result
     assert result["e2e-aws-ovn"]["permafail"] is True
     assert result["e2e-aws-ovn"]["reason"] == "3/3 runs share common test failures"
+
+
+def test_verdict_permafail_overrides_false_boolean(tmp_path):
+    """Test verdict: PERMAFAIL is treated as permafail even if permafail: false"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    # Store analysis with verdict-based schema
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/1",
+        pr_number=3243,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn-local-gateway",
+        signature={},
+        permafail_result={
+            "permafail": False,
+            "verdict": "PERMAFAIL",
+            "confidence": 1.0,
+            "matching_runs": 3,
+            "comparable_runs": 3,
+            "failure_type": "test_failure",
+            "all_common_tests": ["TestFoo", "TestBar"]
+        },
+        db_path=str(db_path)
+    )
+
+    # Test URL-level status
+    status = get_permafail_status(["https://prow.ci.openshift.org/view/1"], str(db_path))
+    assert status["https://prow.ci.openshift.org/view/1"]["permafail"] is True
+    assert len(status["https://prow.ci.openshift.org/view/1"]["reason"]) > 0
+    assert "PERMAFAIL" in status["https://prow.ci.openshift.org/view/1"]["reason"]
+
+    # Test PR-level status
+    pr_status = get_pr_permafail_status("openshift/ovn-kubernetes", 3243, str(db_path))
+    assert "e2e-aws-ovn-local-gateway" in pr_status
+    assert pr_status["e2e-aws-ovn-local-gateway"]["permafail"] is True
+    assert len(pr_status["e2e-aws-ovn-local-gateway"]["reason"]) > 0
+
+
+def test_normalize_permafail_synthesizes_reason_from_verdict(tmp_path):
+    """Test normalize_permafail_result() synthesizes reason when missing"""
+    from utils.db import normalize_permafail_result
+
+    result = normalize_permafail_result({
+        "permafail": False,
+        "verdict": "PERMAFAIL",
+        "confidence": 1.0,
+        "matching_runs": 3,
+        "comparable_runs": 3,
+        "failure_type": "test_failure",
+        "all_common_tests": ["TestFoo", "TestBar", "TestBaz"]
+    })
+
+    assert result["permafail"] is True
+    assert "reason" in result
+    assert len(result["reason"]) > 0
+    assert "PERMAFAIL" in result["reason"]
+    assert "3/3" in result["reason"]
+    assert "100%" in result["reason"]
+
+    string_confidence_result = normalize_permafail_result({
+        "verdict": "PERMAFAIL",
+        "confidence": "high"
+    })
+
+    assert string_confidence_result["permafail"] is True
+    assert "Confidence: high" in string_confidence_result["reason"]
