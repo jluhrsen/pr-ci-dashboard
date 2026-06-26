@@ -8,6 +8,26 @@ from datetime import datetime, UTC
 DB_PATH = os.environ.get('PR_CI_DASHBOARD_DB',
                          os.path.expanduser('~/.local/share/pr-ci-dashboard/dashboard.db'))
 
+
+def is_permafail_result(permafail_result):
+    """Return the permafail verdict from current or legacy analysis result shapes."""
+    if not isinstance(permafail_result, dict):
+        return False
+    if "permafail" in permafail_result:
+        return bool(permafail_result.get("permafail"))
+    return bool(permafail_result.get("is_permafail", False))
+
+
+def normalize_permafail_result(permafail_result):
+    """Ensure analysis result dicts always expose the UI/API `permafail` key."""
+    if not isinstance(permafail_result, dict):
+        return {"permafail": False, "reason": ""}
+
+    normalized = dict(permafail_result)
+    normalized["permafail"] = is_permafail_result(permafail_result)
+    return normalized
+
+
 def init_db(db_path=None):
     """Initialize database and create tables if they don't exist
 
@@ -70,6 +90,7 @@ def store_analysis(job_url, pr_number, repo, job_name, signature, permafail_resu
         RuntimeError: If database operation fails
     """
     path = db_path or DB_PATH
+    permafail_result = normalize_permafail_result(permafail_result)
     conn = None
     try:
         conn = sqlite3.connect(path)
@@ -139,7 +160,7 @@ def get_permafail_status(job_urls, db_path=None):
             override = bool(row[2])
 
             result[job_url] = {
-                "permafail": permafail_result.get("permafail", False),
+                "permafail": is_permafail_result(permafail_result),
                 "reason": permafail_result.get("reason", ""),
                 "override": override
             }
@@ -197,7 +218,7 @@ def get_pr_permafail_status(repo, pr_number, db_path=None):
             override = bool(row[3])
 
             # Only include if permafail=True (ignore non-permafail cached results)
-            if permafail_result.get("permafail", False) and not override:
+            if is_permafail_result(permafail_result) and not override:
                 if job_name not in jobs:
                     jobs[job_name] = {
                         "permafail": True,

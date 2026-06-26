@@ -386,6 +386,31 @@ def test_get_permafail_status_with_override(tmp_path):
     assert result["https://prow.ci.openshift.org/view/gs/123"]["override"] is True
 
 
+def test_get_permafail_status_supports_legacy_is_permafail_key(tmp_path):
+    """Test cached analysis using is_permafail is normalized to permafail=True"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    job_url = "https://prow.ci.openshift.org/view/gs/legacy"
+    store_analysis(
+        job_url=job_url,
+        pr_number=1234,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={},
+        permafail_result={
+            "is_permafail": True,
+            "reason": "3/3 runs share common test failures"
+        },
+        db_path=str(db_path)
+    )
+
+    result = get_permafail_status([job_url], str(db_path))
+
+    assert result[job_url]["permafail"] is True
+    assert result[job_url]["reason"] == "3/3 runs share common test failures"
+
+
 def test_get_permafail_status_malformed_json(tmp_path):
     """Test that get_permafail_status raises RuntimeError on malformed JSON"""
     db_path = tmp_path / "test.db"
@@ -605,3 +630,28 @@ def test_get_pr_permafail_status_empty_for_no_results(tmp_path):
     result = get_pr_permafail_status("openshift/ovn-kubernetes", 1234, str(db_path))
 
     assert result == {}
+
+
+def test_get_pr_permafail_status_supports_legacy_is_permafail_key(tmp_path):
+    """Test PR-level permafail status includes legacy is_permafail cached rows"""
+    db_path = tmp_path / "test.db"
+    init_db(str(db_path))
+
+    store_analysis(
+        job_url="https://prow.ci.openshift.org/view/gs/legacy",
+        pr_number=3243,
+        repo="openshift/ovn-kubernetes",
+        job_name="e2e-aws-ovn",
+        signature={},
+        permafail_result={
+            "is_permafail": True,
+            "reason": "3/3 runs share common test failures"
+        },
+        db_path=str(db_path)
+    )
+
+    result = get_pr_permafail_status("openshift/ovn-kubernetes", 3243, str(db_path))
+
+    assert "e2e-aws-ovn" in result
+    assert result["e2e-aws-ovn"]["permafail"] is True
+    assert result["e2e-aws-ovn"]["reason"] == "3/3 runs share common test failures"
