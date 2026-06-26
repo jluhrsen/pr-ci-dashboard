@@ -181,6 +181,26 @@ function saveAutoRetestState() {
     }
 }
 
+function setPermafailJobState(jobKey, status, jobUrls = []) {
+    /**
+     * Helper to safely set permafail job state while preserving job_urls metadata
+     * Merges with existing entry and deduplicates URLs
+     */
+    const existing = permafailJobs.get(jobKey);
+    const existingUrls = existing?.job_urls || [];
+    const newUrls = Array.isArray(jobUrls) ? jobUrls : [];
+
+    // Merge and deduplicate URLs
+    const allUrls = [...new Set([...existingUrls, ...newUrls])];
+
+    permafailJobs.set(jobKey, {
+        permafail: status.permafail,
+        reason: status.reason,
+        override: status.override !== undefined ? status.override : false,
+        job_urls: allUrls
+    });
+}
+
 async function loadPRPermafails(owner, repo, number) {
     /**
      * Load permafail status for a PR from the database
@@ -199,12 +219,7 @@ async function loadPRPermafails(owner, repo, number) {
         // Populate permafailJobs Map
         for (const [jobName, data] of Object.entries(permafails)) {
             const jobKey = `${prKey}/${jobName}`;
-            permafailJobs.set(jobKey, {
-                permafail: data.permafail,
-                reason: data.reason,
-                override: data.override,
-                job_urls: data.job_urls || []
-            });
+            setPermafailJobState(jobKey, data, data.job_urls || []);
         }
 
         console.log(`Loaded ${Object.keys(permafails).length} permafail job(s) for ${owner}/${repo}#${number}`);
@@ -646,11 +661,11 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
 
         if (result.permafail) {
             // Mark job as permafail (don't disable auto-retest for entire PR yet)
-            permafailJobs.set(jobKey, {
+            setPermafailJobState(jobKey, {
                 permafail: true,
                 reason: result.reason,
                 override: false
-            });
+            }, jobUrls);
 
             // Clear failure counter when job is marked permafail
             jobFailureCounters.delete(jobKey);
@@ -883,7 +898,7 @@ async function loadCachedPermafailResults(list, failedJobs) {
                     const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
 
                     renderPermafailIcon(jobElement, result.reason);
-                    permafailJobs.set(jobKey, result);
+                    setPermafailJobState(jobKey, result, [url]);
 
                     // Disable "Check for Permafail" button since we have a cached permafail
                     const checkBtn = jobElement.querySelector('.check-permafail-btn');
@@ -1071,7 +1086,7 @@ async function handleForceReanalyze() {
         if (result.permafail) {
             // Mark as permafail with fresh analysis
             renderPermafailIcon(jobElement, result.reason);
-            permafailJobs.set(jobKey, result);
+            setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
             if (checkPermafailBtn) {
                 checkPermafailBtn.disabled = true;
                 checkPermafailBtn.textContent = 'Permafail (confirmed)';
@@ -1079,7 +1094,7 @@ async function handleForceReanalyze() {
             showToast('Fresh analysis: Permafail detected - ' + result.reason, 'error');
         } else {
             // No permafail detected - store result and show info icon
-            permafailJobs.set(jobKey, result);
+            setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
             renderNonPermafailInfo(jobElement, result.reason);
             if (checkPermafailBtn) {
                 checkPermafailBtn.textContent = 'No permafail detected';
@@ -1506,7 +1521,7 @@ async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
                 const jobElement = document.querySelector(`[data-job-url="${jobUrls[0]}"]`);
                 if (jobElement) {
                     renderPermafailIcon(jobElement, result.reason);
-                    permafailJobs.set(jobKey, result);
+                    setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
                 }
                 return; // Don't retest
             }
@@ -1553,22 +1568,43 @@ async function manualPermafailCheck(jobElement, buttonElement) {
     const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
 
     try {
-        // First check if we already have cached results
-        const statusResponse = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify([jobUrls[0]]))}`);
+        // First check if we already have cached results for ANY of the URLs
+        const statusResponse = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify(jobUrls))}`);
         if (statusResponse.ok) {
             const statusData = await statusResponse.json();
-            const cachedResult = statusData[jobUrls[0]];
 
-            if (cachedResult && cachedResult.permafail && !cachedResult.override) {
+            // Check if ANY URL has a cached permafail result
+            const permafailUrl = jobUrls.find(url => {
+                const result = statusData[url];
+                return result && result.permafail && !result.override;
+            });
+
+            if (permafailUrl) {
                 // We have a cached permafail result - use it
+                const cachedResult = statusData[permafailUrl];
                 renderPermafailIcon(jobElement, cachedResult.reason);
-                permafailJobs.set(jobKey, cachedResult);
+                // Collect all URLs that have cached permafail results
+                const permafailUrls = jobUrls.filter(url => {
+                    const result = statusData[url];
+                    return result && result.permafail && !result.override;
+                });
+                setPermafailJobState(jobKey, cachedResult, permafailUrls);
                 buttonElement.style.display = 'none';
                 showToast('Using cached permafail result', 'info');
                 return;
-            } else if (cachedResult && !cachedResult.permafail) {
-                // We have a cached "not permafail" result - show it with info icon
-                permafailJobs.set(jobKey, cachedResult);
+            }
+
+            // Check if ALL URLs have cached results and ALL are non-permafail
+            const allCached = jobUrls.every(url => statusData[url]);
+            const allNonPermafail = jobUrls.every(url => {
+                const result = statusData[url];
+                return result && !result.permafail;
+            });
+
+            if (allCached && allNonPermafail) {
+                // All URLs cached and all non-permafail - show it with info icon
+                const cachedResult = statusData[jobUrls[0]];
+                setPermafailJobState(jobKey, cachedResult, jobUrls);
                 renderNonPermafailInfo(jobElement, cachedResult.reason);
                 buttonElement.textContent = 'No permafail (cached)';
                 setTimeout(() => {
@@ -1603,12 +1639,12 @@ async function manualPermafailCheck(jobElement, buttonElement) {
         if (result.permafail) {
             // Mark as permafail
             renderPermafailIcon(jobElement, result.reason);
-            permafailJobs.set(jobKey, result);
+            setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
             buttonElement.style.display = 'none';
             showToast('Permafail detected: ' + result.reason, 'error');
         } else {
             // No permafail detected - store result and show info icon
-            permafailJobs.set(jobKey, result);
+            setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
             renderNonPermafailInfo(jobElement, result.reason);
             buttonElement.textContent = 'No permafail detected';
             setTimeout(() => {
