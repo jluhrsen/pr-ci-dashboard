@@ -828,8 +828,18 @@ function showPermafailModal(reason, isPermafail = true, fullResult = null) {
     const bodyElement = modal.querySelector('.permafail-modal-body');
 
     if (fullResult) {
-        // Show formatted JSON with syntax highlighting
         const displayReason = reason || "No analysis details available";
+
+        // Extract terminal output if available, otherwise use the result object
+        let jsonDisplay;
+        if (fullResult._terminalOutput) {
+            // Use raw terminal output which contains the original analyzer JSON
+            jsonDisplay = fullResult._terminalOutput;
+        } else {
+            // Fallback to formatted result object
+            jsonDisplay = JSON.stringify(fullResult, null, 2);
+        }
+
         bodyElement.innerHTML = `
             <div style="margin-bottom: 16px;">
                 <strong>Summary:</strong><br>
@@ -837,7 +847,7 @@ function showPermafailModal(reason, isPermafail = true, fullResult = null) {
             </div>
             <div>
                 <strong>Full Analysis Result:</strong>
-                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; max-height: 400px;">${JSON.stringify(fullResult, null, 2)}</pre>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; max-height: 400px; white-space: pre-wrap;">${jsonDisplay}</pre>
             </div>
         `;
     } else {
@@ -1894,6 +1904,8 @@ async function analyzeWithStreaming(pr, repo, jobName, jobUrls) {
         // Show terminal modal
         showTerminalModal();
 
+        let terminalOutput = ''; // Capture all terminal output
+
         // Send analysis request via fetch
         fetch('/api/jobs/analyze-stream', {
             method: 'POST',
@@ -1927,8 +1939,14 @@ async function analyzeWithStreaming(pr, repo, jobName, jobUrls) {
 
                         if (data.type === 'output') {
                             appendTerminalLine(data.line);
+                            terminalOutput += data.line + '\n';
                         } else if (data.type === 'result') {
-                            resolve(data.data);
+                            // Attach terminal output to result for JSON display
+                            const resultWithTerminal = {
+                                ...data.data,
+                                _terminalOutput: terminalOutput
+                            };
+                            resolve(resultWithTerminal);
                             return;
                         } else if (data.type === 'error') {
                             appendTerminalLine('ERROR: ' + data.message);
