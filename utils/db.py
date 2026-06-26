@@ -22,7 +22,10 @@ def init_db(db_path=None):
     # Ensure directory exists
     db_dir = os.path.dirname(path)
     if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir, exist_ok=True)
+        try:
+            os.makedirs(db_dir, exist_ok=True)
+        except OSError as e:
+            raise RuntimeError(f"Failed to initialize database at {path}: Cannot create directory {db_dir}: {e}")
 
     conn = None
     try:

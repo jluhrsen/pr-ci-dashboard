@@ -22,6 +22,7 @@ const autoRetestEnabled = new Map(); // "owner/repo/number" -> boolean
 const jobFailureCounters = new Map(); // "owner/repo/number/jobName" -> count
 const jobStateCache = new Map(); // "owner/repo/number/jobName" -> 'success'|'failure'|'pending'
 const pollingIntervals = new Map(); // "owner/repo/number" -> intervalId
+const autoRetestCooldown = new Map(); // "owner/repo/number/jobName" -> timestamp of last retest
 
 // Context menu tracking
 let contextMenuTarget = null;
@@ -201,7 +202,8 @@ async function loadPRPermafails(owner, repo, number) {
             permafailJobs.set(jobKey, {
                 permafail: data.permafail,
                 reason: data.reason,
-                override: data.override
+                override: data.override,
+                job_urls: data.job_urls || []
             });
         }
 
@@ -331,6 +333,12 @@ async function checkJobStatesForAutoRetest(prKey) {
         // Track which jobs are in current response
         const currentJobNames = new Set(allJobs.map(j => j.name));
 
+        // Build set of currently running job names for quick lookup
+        const runningJobNames = new Set(
+            [...(data.e2e?.running || []), ...(data.payload?.running || [])]
+                .map(j => j.name)
+        );
+
         // Check for jobs that disappeared (were running/pending, now gone = succeeded)
         for (const [cachedKey, cachedState] of jobStateCache.entries()) {
             // Only check jobs for this PR
@@ -338,8 +346,10 @@ async function checkJobStatesForAutoRetest(prKey) {
 
             const jobName = cachedKey.split('/').slice(3).join('/'); // Everything after owner/repo/number
 
-            // If job was pending/running and now disappeared, mark as success
-            if ((cachedState === 'pending' || cachedState === 'failure') && !currentJobNames.has(jobName)) {
+            // If job was pending/failure and now disappeared AND not running, mark as success
+            if ((cachedState === 'pending' || cachedState === 'failure') &&
+                !currentJobNames.has(jobName) &&
+                !runningJobNames.has(jobName)) {
                 jobStateCache.set(cachedKey, 'success');
                 // Reset failure counter when job succeeds
                 jobFailureCounters.delete(cachedKey);
@@ -379,8 +389,19 @@ async function checkJobStatesForAutoRetest(prKey) {
                 }
             }
 
-            // Update cache
+            // Update cache and clear failure counter if job succeeded
+            if (currentState === 'success') {
+                jobFailureCounters.delete(jobKey);
+            }
             jobStateCache.set(jobKey, currentState);
+        }
+
+        // Clean up old cooldown entries (older than 10 minutes)
+        const now = Date.now();
+        for (const [key, timestamp] of autoRetestCooldown.entries()) {
+            if (now - timestamp > 10 * 60 * 1000) {
+                autoRetestCooldown.delete(key);
+            }
         }
 
         // Process immediate retests (no permafail check needed)
@@ -394,9 +415,29 @@ async function checkJobStatesForAutoRetest(prKey) {
                 continue;
             }
 
+            // Skip if job is currently running
+            if (runningJobNames.has(job.name)) {
+                console.log(`Skipping auto-retest for ${job.name} - job is currently running`);
+                continue;
+            }
+
+            // Skip if job was recently retested (within 3 minutes)
+            const lastRetestTime = autoRetestCooldown.get(jobKey);
+            const cooldownPeriod = 3 * 60 * 1000; // 3 minutes
+            if (lastRetestTime && (now - lastRetestTime) < cooldownPeriod) {
+                const remainingSeconds = Math.ceil((cooldownPeriod - (now - lastRetestTime)) / 1000);
+                console.log(`Skipping auto-retest for ${job.name} - in cooldown (${remainingSeconds}s remaining)`);
+                continue;
+            }
+
             console.log(`Auto-retesting ${job.name} (attempt ${count})`);
-            await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
-            showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
+            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+
+            // Mark cooldown and show toast only after successful retest
+            if (retestResult === true) {
+                autoRetestCooldown.set(jobKey, now);
+                showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
+            }
         }
 
         // Process permafail checks in batches of 2 with progress indicator
@@ -415,7 +456,7 @@ async function checkJobStatesForAutoRetest(prKey) {
             });
 
             if (jobsToCheck.length > 0) {
-                await processPermafailChecks(owner, repo, number, prKey, jobsToCheck);
+                await processPermafailChecks(owner, repo, number, prKey, jobsToCheck, runningJobNames);
             }
         }
 
@@ -482,7 +523,7 @@ async function checkIfAllFailingJobsArePermafail(prKey) {
     }
 }
 
-async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck) {
+async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck, runningJobNames) {
     const totalJobs = jobsToCheck.length;
     let completed = 0;
 
@@ -497,7 +538,7 @@ async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck) {
         // Run up to 2 checks in parallel
         await Promise.all(batch.map(async ({ job, count }) => {
             console.log(`Checking permafail for ${job.name} (${count} consecutive failures)`);
-            await checkPermafailBeforeRetest(owner, repo, number, job, prKey);
+            await checkPermafailBeforeRetest(owner, repo, number, job, prKey, runningJobNames);
             completed++;
             // Update progress toast
             updateToast(progressToastId, `🔍 Analyzing permafails for PR #${number}: ${completed}/${totalJobs} jobs`);
@@ -530,15 +571,36 @@ async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck) {
     }
 }
 
-async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
+async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runningJobNames) {
+    const jobKey = `${prKey}/${job.name}`;
+
     try {
+        // Skip if job is currently running
+        if (runningJobNames.has(job.name)) {
+            console.log(`Skipping permafail check for ${job.name} - job is currently running`);
+            return;
+        }
+
+        // Skip if job was recently retested (cooldown check)
+        const now = Date.now();
+        const lastRetestTime = autoRetestCooldown.get(jobKey);
+        const cooldownPeriod = 3 * 60 * 1000; // 3 minutes
+        if (lastRetestTime && (now - lastRetestTime) < cooldownPeriod) {
+            const remainingSeconds = Math.ceil((cooldownPeriod - (now - lastRetestTime)) / 1000);
+            console.log(`Skipping permafail check for ${job.name} - in cooldown (${remainingSeconds}s remaining)`);
+            return;
+        }
+
         // Get job URLs from the job object
         const jobUrls = job.urls || [];
 
         if (jobUrls.length < 2) {
             console.warn(`Not enough job URLs for permafail check on ${job.name}`);
             // Retest anyway if we can't check (skip tracking since this is auto-retest)
-            await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+            if (retestResult !== false) {
+                autoRetestCooldown.set(jobKey, now);
+            }
             return;
         }
 
@@ -582,8 +644,6 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
             result = await response.json();
         }
 
-        const jobKey = `${prKey}/${job.name}`;
-
         if (result.permafail) {
             // Mark job as permafail (don't disable auto-retest for entire PR yet)
             permafailJobs.set(jobKey, {
@@ -592,6 +652,9 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
                 override: false
             });
 
+            // Clear failure counter when job is marked permafail
+            jobFailureCounters.delete(jobKey);
+
             showToast(`⚠️ Permafail detected on ${job.name}: ${result.reason}`, 'error');
             console.log(`Marked ${job.name} as permafail (auto-retest will continue for other jobs)`);
 
@@ -599,13 +662,21 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey) {
         } else {
             // Not a permafail - proceed with retest (skip tracking since this is auto-retest)
             console.log(`No permafail detected on ${job.name}, retesting...`);
-            await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
-            showToast(`🔄 Retesting ${job.name} (permafail check passed)`, 'info');
+            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+
+            // Mark cooldown and show toast only after successful retest
+            if (retestResult === true) {
+                autoRetestCooldown.set(jobKey, now);
+                showToast(`🔄 Retesting ${job.name} (permafail check passed)`, 'info');
+            }
         }
     } catch (error) {
         console.error('Error checking permafail:', error);
         // On error, allow retest (fail open, skip tracking since this is auto-retest)
-        await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+        const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+        if (retestResult === true) {
+            autoRetestCooldown.set(jobKey, now);
+        }
     }
 }
 
@@ -872,27 +943,45 @@ async function handleClearPermafail() {
     if (!contextMenuTarget) return;
 
     const { jobElement, jobKey } = contextMenuTarget;
-    const jobUrl = jobElement.dataset.jobUrl;
 
-    if (!jobUrl) {
-        console.error('No job URL found on element');
+    // Collect ALL URLs for this job from multiple sources
+    const urlsFromElement = JSON.parse(jobElement.dataset.jobUrls || '[]');
+    const permafailData = permafailJobs.get(jobKey);
+    const urlsFromMap = permafailData?.job_urls || [];
+
+    // Combine and deduplicate
+    const allUrls = [...new Set([...urlsFromElement, ...urlsFromMap])];
+
+    if (allUrls.length === 0) {
+        console.error('No job URLs found for clearing permafail');
         hideContextMenu();
         return;
     }
 
     try {
-        const response = await fetch('/api/jobs/override', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_url: jobUrl })
-        });
+        // Clear override for all URLs
+        const clearPromises = allUrls.map(url =>
+            fetch('/api/jobs/override', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_url: url })
+            })
+        );
 
-        if (response.ok) {
+        const results = await Promise.allSettled(clearPromises);
+        const succeeded = results.filter(r => r.status === 'fulfilled' && r.value.ok);
+        const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok));
+
+        if (succeeded.length > 0) {
             clearPermafailUI(jobElement, jobKey);
-            showToast('Permafail cleared successfully', 'success');
+        }
+
+        if (failed.length === 0) {
+            showToast(`Permafail cleared for ${allUrls.length} URL(s)`, 'success');
+        } else if (succeeded.length > 0) {
+            showToast(`Cleared ${succeeded.length}/${allUrls.length} URL(s)`, 'warning');
         } else {
-            const error = await response.json();
-            showToast('Failed to clear permafail: ' + (error.error || 'Unknown error'), 'error');
+            showToast(`Failed to clear all ${allUrls.length} URL(s)`, 'error');
         }
     } catch (error) {
         console.error('Failed to clear permafail:', error);
@@ -1555,18 +1644,22 @@ async function retestJob(owner, repo, pr, jobs, type, skipTracking = false) {
         if (result.error === 'auth_failed') {
             showAuthBanner('GitHub CLI not authenticated. Run: gh auth login');
             disableAllRetestButtons();
+            return false;
         } else if (result.success) {
             showToast(`✅ Retest triggered for ${jobs.length} job(s)`, 'success');
             // Skip tracking for auto-retest (it has its own 30s polling)
             if (!skipTracking) {
                 trackRetestedJobs(owner, repo, pr, jobs);
             }
+            return true;
         } else {
             showToast(`❌ Error: ${result.error}`, 'error');
+            return false;
         }
     } catch (error) {
         console.error('Retest failed:', error);
         showToast('Retest failed: ' + error.message, 'error');
+        return false;
     }
 }
 
