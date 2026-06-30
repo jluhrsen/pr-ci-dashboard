@@ -6,19 +6,30 @@
 
 ## Quick Start
 
+### Local Development
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jluhrsen/pr-ci-dashboard/main/run.sh | sh
+# Install as package
+pip install -e .
+
+# Run dashboard
+pr-ci-dashboard --port 5000
 ```
 
 Then open **http://localhost:5000**
 
-**🔒 Security Note:** The [run.sh script](run.sh) downloads this repo to `/tmp` and runs Python locally - no sudo, no permanent changes. Press Ctrl+C to stop and clean up. Review the script before running if concerned.
+**Custom search:**
+```bash
+pr-ci-dashboard --search "author:jluhrsen repo:openshift/ovn-kubernetes"
+```
 
-### With Custom Search
+### Quick Run (Development)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jluhrsen/pr-ci-dashboard/main/run.sh | sh -s -- author:jluhrsen repo:openshift/ovn-kubernetes
+curl -fsSL https://raw.githubusercontent.com/jluhrsen/pr-ci-dashboard/main/run.sh | sh
 ```
+
+**🔒 Security Note:** The [run.sh script](run.sh) downloads this repo to `/tmp` and runs Python locally - no sudo, no permanent changes. Press Ctrl+C to stop and clean up. Review the script before running if concerned.
 
 ## Features
 
@@ -48,23 +59,46 @@ The dashboard automatically detects **permafails** - jobs with systematic failur
 
 4. **Override:** Right-click a job card → "Clear permafail" to re-enable retesting
 
-### Requirements
-
-- Claude Code CLI installed and available in PATH
-- `ci-prow-navigation` skill available (from OpenShift CI plugin)
-
 ### Database
 
-Analysis results are cached in `dashboard.db` (SQLite) to avoid redundant AI calls.
+Analysis results are cached in SQLite to avoid redundant AI calls.
+
+**Database location:**
+- Default: `~/.local/share/pr-ci-dashboard/dashboard.db`
+- Override with `--db-path` CLI option or `PR_CI_DASHBOARD_DB` environment variable
 
 ## Prerequisites
 
-- **Python 3.8+**
+### Required for All Use Cases
+
+- **Python 3.11+**
 - **GitHub CLI** (`gh`) authenticated - https://cli.github.com
   ```bash
   gh auth login
   gh auth status
   ```
+
+  The `gh` CLI is required for:
+  - PR search functionality
+  - Job retest operations
+  - All script-based operations
+
+### Required for Permafail Analysis
+
+- **Claude Code CLI** installed and available in PATH
+- **`ci@ai-helpers` plugin** installed:
+  ```bash
+  claude plugin marketplace add openshift-eng/ai-helpers
+  claude plugin install ci@ai-helpers
+  ```
+- **Vertex AI credentials** configured:
+  ```bash
+  export CLAUDE_CODE_USE_VERTEX=1
+  export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
+  export GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json
+  ```
+
+  Without these, permafail analysis will be unavailable but other features work normally.
 
 ## Using the Dashboard
 
@@ -75,21 +109,44 @@ Analysis results are cached in `dashboard.db` (SQLite) to avoid redundant AI cal
   - Button shows "⏳ Retesting..." and polls until job starts running
 - **PR links**: Click red PR number to open on GitHub
 
-## Manual Installation
+## Installation & Usage
+
+### Install
 
 ```bash
 git clone https://github.com/jluhrsen/pr-ci-dashboard.git
 cd pr-ci-dashboard
-pip install -r requirements.txt
-python server.py [search-args...]
+pip install -e .
 ```
 
-**Custom search examples:**
+### Run Locally
+
 ```bash
-python server.py author:jluhrsen
-python server.py repo:openshift/ovn-kubernetes
-python server.py author:jluhrsen label:bug is:draft
+# Default search
+pr-ci-dashboard --port 5000
+
+# Custom search
+pr-ci-dashboard --search "author:jluhrsen repo:openshift/ovn-kubernetes" --port 5000
+
+# Custom database location
+pr-ci-dashboard --db-path /custom/path/dashboard.db --port 5000
 ```
+
+**CLI Options:**
+- `--port PORT` - Server port (default: 5000, or `DASHBOARD_PORT` env var)
+- `--search QUERY` - Search terms appended to the default query
+- `--search-override QUERY` - Completely replace the default search query
+- `--db-path PATH` - Database file location (overrides `PR_CI_DASHBOARD_DB` env var)
+- `--debug` - Enable Flask debug mode (development only - never use in production; also `DASHBOARD_DEBUG` env var)
+- Positional arguments - legacy form, appended to the search query: `pr-ci-dashboard author:jluhrsen`
+
+**Backward compatibility:**
+- Entry point: `python server.py` still works but `pr-ci-dashboard` CLI is preferred
+- Positional search terms (`pr-ci-dashboard author:foo`) still append to the query as before
+- Module imports: All imports now use `pr_ci_dashboard.*` package prefix
+  - Old: `from utils.db import init_db`
+  - New: `from pr_ci_dashboard.utils.db import init_db`
+- Direct script execution: Use `pr-ci-dashboard` CLI instead of `python -m pr_ci_dashboard.server`
 
 **Default search:** `is:pr is:open archived:false author:openshift-pr-manager[bot]`
 
@@ -97,20 +154,99 @@ python server.py author:jluhrsen label:bug is:draft
 
 - **Backend**: Flask server running bash scripts via subprocess
 - **Frontend**: Vanilla JS with Red Hat theme
-- **Scripts**: Local bash scripts in `scripts/` directory for PR search and job retesting
+- **Scripts**: Bash scripts installed as package data for PR search and job retesting
 - **Auth**: Uses local `gh` CLI credentials (no OAuth setup needed)
+
+## Container Deployment
+
+### Build Container Image
+
+```bash
+podman build -t pr-ci-dashboard:latest .
+```
+
+**Build Requirements:**
+- Network access to `https://downloads.claude.ai` (for Claude Code CLI)
+- Network access to Claude plugin registry (for ai-helpers plugin)
+- The production base image (`registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.22`) may require registry authentication
+
+**For air-gapped environments:** Pre-download dependencies or use a multi-stage build with a connected build stage.
+
+### Run Container Locally
+
+```bash
+podman run -p 5000:5000 \
+  -v ./data:/data \
+  -v ~/.config/gcloud/sa.json:/secrets/gcp/sa.json:ro \
+  -e PR_CI_DASHBOARD_DB=/data/dashboard.db \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp/sa.json \
+  -e CLAUDE_CODE_USE_VERTEX=1 \
+  -e ANTHROPIC_VERTEX_PROJECT_ID=your-project \
+  pr-ci-dashboard:latest
+```
+
+**Requirements:**
+- Mount `/data` for SQLite database persistence
+- Mount GCP service account credentials for Vertex AI
+- GitHub authentication: **Not yet resolved for containerized deployment** - you must configure this separately
+
+## Kubernetes Deployment
+
+### Phase 1 (Current)
+
+Single-replica deployment with SQLite and ReadWriteOnce PVC.
+
+**Setup:**
+
+```bash
+# Create namespace
+kubectl create namespace pr-ci-dashboard
+
+# Create GCP service account secret
+kubectl create secret generic gcp-service-account \
+  --from-file=sa.json=/path/to/service-account-key.json \
+  -n pr-ci-dashboard
+
+# Deploy
+kubectl apply -f k8s/ -n pr-ci-dashboard
+
+# Access via port-forward
+kubectl port-forward -n pr-ci-dashboard service/pr-ci-dashboard 5000:80
+```
+
+**OpenShift note:** `k8s/deployment.yaml` sets `fsGroup: 0` so the PVC is writable by the image's UID 1001 / GID 0 user on vanilla Kubernetes. On OpenShift, remove the `fsGroup` line - the restricted SCC rejects an explicit `0` and assigns a suitable fsGroup from the namespace range automatically.
+
+**Limitations:**
+- Single replica only (SQLite + ReadWriteOnce PVC)
+- Recreate deployment strategy (no zero-downtime updates)
+- No public DNS/Ingress/Route (port-forward access only)
+- GitHub authentication not configured
+
+**Not Yet Available:**
+- Multi-replica support (requires PostgreSQL migration)
+- Production DNS/routing
+- GitHub App authentication
+- GitOps deployment patterns
 
 ## Project Structure
 
 ```
 pr-ci-dashboard/
-├── server.py           # Flask entry point
-├── api/                # API endpoints (search, jobs, retest)
-├── parsers/            # Parse script output
-├── scripts/            # Bash scripts for PR search and job retesting
-├── utils/              # Script executor, auth check
-├── static/             # app.js, styles.css
-└── templates/          # index.html
+├── pr_ci_dashboard/      # Python package
+│   ├── api/              # API endpoints (search, jobs, retest)
+│   ├── parsers/          # Parse script output
+│   ├── scripts/          # Bash scripts (installed as package data)
+│   ├── utils/            # Script executor, auth check, AI analysis
+│   ├── static/           # app.js, styles.css, assets
+│   ├── templates/        # index.html
+│   └── server.py         # Flask application
+├── k8s/                  # Kubernetes manifests
+│   ├── deployment.yaml   # Deployment (single replica, Recreate)
+│   ├── service.yaml      # ClusterIP service
+│   └── pvc.yaml          # PersistentVolumeClaim (SQLite storage)
+├── tests/                # Test suite
+├── Containerfile         # Container image definition
+└── pyproject.toml        # Package metadata
 ```
 
 ## Troubleshooting
@@ -122,7 +258,7 @@ gh auth status
 ```
 
 **Scripts timeout**
-Increase timeout in `utils/job_executor.py` (default 30s)
+Increase timeout in `pr_ci_dashboard/utils/job_executor.py` (default 30s)
 
 ## Documentation
 
