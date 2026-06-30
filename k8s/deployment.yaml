@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pr-ci-dashboard
+  labels:
+    app: pr-ci-dashboard
+spec:
+  # Single replica required for SQLite + ReadWriteOnce PVC
+  replicas: 1
+
+  # Recreate strategy required for single-replica deployment with ReadWriteOnce PVC
+  # RWO PVC cannot be mounted by multiple pods simultaneously (prevents rolling updates)
+  # Zero-downtime updates require either:
+  #   - PostgreSQL with network storage (Phase 3)
+  #   - ReadWriteMany PVC with shared SQLite WAL mode
+  strategy:
+    type: Recreate
+
+  selector:
+    matchLabels:
+      app: pr-ci-dashboard
+
+  template:
+    metadata:
+      labels:
+        app: pr-ci-dashboard
+    spec:
+      # Security context: OpenShift-compatible
+      # Image defaults to USER 1001 for vanilla k8s runAsNonRoot validation
+      # OpenShift SCC can override with arbitrary UID from namespace range
+      # Image has g=u permissions on /data and /home/claude for any assigned UID
+      securityContext:
+        runAsNonRoot: true
+        # fsGroup 0 (root group) makes the PVC mounted at /data group-writable
+        # for the image's UID 1001 / GID 0 user; without it, init_db() cannot
+        # create /data/dashboard.db and the pod crash-loops on vanilla k8s.
+        # OpenShift: remove this line - restricted-v2 SCC rejects an explicit 0
+        # and assigns fsGroup from the namespace range automatically (the
+        # image's g=u permissions cover SCC-assigned GIDs).
+        fsGroup: 0
+
+      containers:
+      - name: dashboard
+        # Production image placeholder - update with actual registry/tag
+        # TODO: Replace with quay.io/openshift/pr-ci-dashboard:<version> when available
+        image: quay.io/openshift/pr-ci-dashboard:latest
+        imagePullPolicy: Always
+
+        # Container security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+
+        ports:
+        - containerPort: 5000
+          name: http
+          protocol: TCP
+
+        env:
+        # Dashboard configuration
+        - name: PR_CI_DASHBOARD_DB
+          value: /data/dashboard.db
+
+        # Claude Code Vertex AI configuration
+        # <internal> project: human users hold Vertex IAM here (the hybrid project
+        # used by openshift/release CI only entitles service accounts)
+        - name: CLAUDE_CODE_USE_VERTEX
+          value: "1"
+        - name: ANTHROPIC_VERTEX_PROJECT_ID
+          value: <internal-vertex-project>
+        - name: CLOUD_ML_REGION
+          value: global
+        # Model pin required: newer CLI default models are not enabled on
+        # some Vertex projects and 403
+        - name: ANTHROPIC_MODEL
+          value: claude-opus-4-6
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /secrets/gcp/sa.json
+
+        # GitHub auth: Future - not yet configured
+        # - name: GITHUB_TOKEN
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: github-credentials
+        #       key: token
+
+        volumeMounts:
+        - name: data
+          mountPath: /data
+
+        - name: gcp-credentials
+          mountPath: /secrets/gcp
+          readOnly: true
+
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+
+        # Liveness probe: check Flask app responds
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Readiness probe: check Flask app ready
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: dashboard-data
+
+      - name: gcp-credentials
+        secret:
+          secretName: gcp-service-account
+          # Optional: only needed for Vertex AI permafail analysis.
+          # Without it the pod still starts; analysis is unavailable.
+          # Alternative auth: a Claude subscription OAuth token from
+          # `claude setup-token`, set as CLAUDE_CODE_OAUTH_TOKEN env
+          # (blank the CLAUDE_CODE_USE_VERTEX/ANTHROPIC_VERTEX_PROJECT_ID
+          # env vars in that case).
+          # Secret created manually:
+          # kubectl create secret generic gcp-service-account \
+          #   --from-file=sa.json=/path/to/service-account-key.json
+          optional: true
