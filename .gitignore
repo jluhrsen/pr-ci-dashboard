@@ -7,6 +7,9 @@ __pycache__/
 venv/
 env/
 *.egg-info/
+build/
+dist/
+*.egg
 
 # Environment files
 .env

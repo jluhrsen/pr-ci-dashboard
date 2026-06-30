@@ -1,5 +1,5 @@
 """Post retest comments to PRs."""
-from utils.gh_auth import post_retest_comment
+from ..utils.gh_auth import post_retest_comment
 
 
 def retest_jobs(owner: str, repo: str, pr: int, jobs: list, job_type: str) -> dict:

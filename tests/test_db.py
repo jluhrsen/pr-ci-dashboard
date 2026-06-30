@@ -2,7 +2,7 @@ import pytest
 import sqlite3
 import os
 import json
-from utils.db import init_db, store_analysis, get_permafail_status, get_pr_permafail_status, clear_override
+from pr_ci_dashboard.utils.db import init_db, store_analysis, get_permafail_status, get_pr_permafail_status, clear_override
 
 def test_init_db_creates_tables(tmp_path):
     """Test that init_db creates job_analyses table with correct schema"""
@@ -696,7 +696,7 @@ def test_verdict_permafail_overrides_false_boolean(tmp_path):
 
 def test_normalize_permafail_synthesizes_reason_from_verdict(tmp_path):
     """Test normalize_permafail_result() synthesizes reason when missing"""
-    from utils.db import normalize_permafail_result
+    from pr_ci_dashboard.utils.db import normalize_permafail_result
 
     result = normalize_permafail_result({
         "permafail": False,

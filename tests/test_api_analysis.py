@@ -2,8 +2,8 @@
 import pytest
 import json
 from unittest.mock import patch
-from server import app
-from utils.db import init_db
+from pr_ci_dashboard.server import app
+from pr_ci_dashboard.utils.db import init_db
 
 @pytest.fixture
 def client(tmp_path):
@@ -41,7 +41,7 @@ def test_analyze_endpoint_triggers_analysis(client, tmp_path):
         "common_tests": ["TestA"]
     }
 
-    with patch('api.analysis.analyze_permafail', return_value=mock_analysis):
+    with patch('pr_ci_dashboard.api.analysis.analyze_permafail', return_value=mock_analysis):
         response = client.post(
             '/api/jobs/analyze',
             data=json.dumps(request_data),
@@ -54,7 +54,7 @@ def test_analyze_endpoint_triggers_analysis(client, tmp_path):
     assert data["reason"] == "TestA failed in all runs"
 
     # Verify analysis was cached in database
-    from utils.db import get_permafail_status
+    from pr_ci_dashboard.utils.db import get_permafail_status
     cached = get_permafail_status(request_data["job_urls"], db_path=str(tmp_path / "test.db"))
     assert len(cached) == 3  # All 3 URLs should be cached
     assert cached[request_data["job_urls"][0]]["permafail"] is True
@@ -79,7 +79,7 @@ def test_analyze_endpoint_normalizes_is_permafail_result(client, tmp_path):
         "signatures": [{}, {}, {}]
     }
 
-    with patch('api.analysis.analyze_permafail', return_value=mock_analysis):
+    with patch('pr_ci_dashboard.api.analysis.analyze_permafail', return_value=mock_analysis):
         response = client.post(
             '/api/jobs/analyze',
             data=json.dumps(request_data),
@@ -91,7 +91,7 @@ def test_analyze_endpoint_normalizes_is_permafail_result(client, tmp_path):
     assert data["permafail"] is True
     assert data["reason"] == "3/3 runs share common test failures"
 
-    from utils.db import get_permafail_status
+    from pr_ci_dashboard.utils.db import get_permafail_status
     cached = get_permafail_status(request_data["job_urls"], db_path=str(tmp_path / "test.db"))
     assert cached[request_data["job_urls"][0]]["permafail"] is True
 
@@ -120,7 +120,7 @@ def test_analyze_endpoint_normalizes_verdict_permafail_result(client, tmp_path):
         "signatures": [{}, {}, {}]
     }
 
-    with patch('api.analysis.analyze_permafail', return_value=mock_analysis):
+    with patch('pr_ci_dashboard.api.analysis.analyze_permafail', return_value=mock_analysis):
         response = client.post(
             '/api/jobs/analyze',
             data=json.dumps(request_data),
@@ -133,7 +133,7 @@ def test_analyze_endpoint_normalizes_verdict_permafail_result(client, tmp_path):
     assert "PERMAFAIL" in data["reason"]
     assert "3/3" in data["reason"]
 
-    from utils.db import get_permafail_status
+    from pr_ci_dashboard.utils.db import get_permafail_status
     cached = get_permafail_status(request_data["job_urls"], db_path=str(tmp_path / "test.db"))
     assert cached[request_data["job_urls"][0]]["permafail"] is True
     assert "PERMAFAIL" in cached[request_data["job_urls"][0]]["reason"]
@@ -256,8 +256,8 @@ def test_analyze_endpoint_database_failure(client, tmp_path):
         "common_tests": ["TestA"]
     }
 
-    with patch('api.analysis.analyze_permafail', return_value=mock_analysis), \
-         patch('api.analysis.store_analysis', side_effect=Exception("DB write failed")):
+    with patch('pr_ci_dashboard.api.analysis.analyze_permafail', return_value=mock_analysis), \
+         patch('pr_ci_dashboard.api.analysis.store_analysis', side_effect=Exception("DB write failed")):
         response = client.post(
             '/api/jobs/analyze',
             data=json.dumps(request_data),
@@ -271,7 +271,7 @@ def test_analyze_endpoint_database_failure(client, tmp_path):
 
 def test_override_endpoint_clears_permafail(client, tmp_path):
     """Test POST /api/jobs/override clears permafail flag"""
-    from utils.db import store_analysis
+    from pr_ci_dashboard.utils.db import store_analysis
 
     # Store a permafail result
     store_analysis(
@@ -297,7 +297,7 @@ def test_override_endpoint_clears_permafail(client, tmp_path):
 
 def test_status_endpoint_returns_batch_status(client, tmp_path):
     """Test GET /api/jobs/status returns permafail status for multiple URLs"""
-    from utils.db import store_analysis
+    from pr_ci_dashboard.utils.db import store_analysis
 
     # Store two results
     store_analysis(
@@ -365,7 +365,7 @@ def test_override_endpoint_missing_job_url(client):
 
 def test_override_endpoint_database_failure(client):
     """Test POST /api/jobs/override handles database failure"""
-    with patch('api.analysis.set_override', side_effect=RuntimeError("DB operation failed")):
+    with patch('pr_ci_dashboard.api.analysis.set_override', side_effect=RuntimeError("DB operation failed")):
         response = client.post(
             '/api/jobs/override',
             data=json.dumps({"job_url": "https://prow.ci.openshift.org/view/12345"}),
@@ -400,7 +400,7 @@ def test_status_endpoint_invalid_json(client):
 
 def test_status_endpoint_database_failure(client):
     """Test GET /api/jobs/status handles database failure"""
-    with patch('api.analysis.get_permafail_status', side_effect=RuntimeError("DB query failed")):
+    with patch('pr_ci_dashboard.api.analysis.get_permafail_status', side_effect=RuntimeError("DB query failed")):
         response = client.get(
             '/api/jobs/status?job_urls=' + json.dumps([
                 "https://prow.ci.openshift.org/view/1"
@@ -415,7 +415,7 @@ def test_status_endpoint_database_failure(client):
 
 def test_pr_permafails_endpoint_returns_grouped_jobs(client):
     """Test GET /api/pr/<owner>/<repo>/<number>/permafails returns grouped permafails"""
-    from utils.db import store_analysis
+    from pr_ci_dashboard.utils.db import store_analysis
 
     db_path = client.application.config['DB_PATH']
 
@@ -472,7 +472,7 @@ def test_pr_permafails_endpoint_empty_when_no_permafails(client):
 
 def test_pr_permafails_endpoint_filters_by_pr(client):
     """Test GET /api/pr/<owner>/<repo>/<number>/permafails only returns jobs for specified PR"""
-    from utils.db import store_analysis
+    from pr_ci_dashboard.utils.db import store_analysis
 
     db_path = client.application.config['DB_PATH']
 

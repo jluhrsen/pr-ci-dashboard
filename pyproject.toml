@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pr-ci-dashboard"
+version = "0.1.0"
+description = "Dashboard for viewing and retesting failed OpenShift PR CI jobs"
+authors = [{name = "Jamo Luhrsen", email = "jluhrsen@redhat.com"}]
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+pr-ci-dashboard = "pr_ci_dashboard.server:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pr_ci_dashboard*"]
+
+[tool.setuptools.package-data]
+pr_ci_dashboard = [
+    "static/*.js",
+    "static/*.css",
+    "static/*.svg",
+    "templates/*.html",
+    "scripts/*.sh",
+]

@@ -2,7 +2,7 @@ import pytest
 import json
 import subprocess
 from unittest.mock import patch, MagicMock
-from utils.ai_analyzer import analyze_permafail
+from pr_ci_dashboard.utils.ai_analyzer import analyze_permafail
 
 def test_analyze_permafail_success():
     """Test that analyze_permafail successfully invokes skill and parses output"""
@@ -123,3 +123,31 @@ def test_analyze_permafail_unexpected_error():
         assert result["permafail"] is False
         assert "Unexpected error" in result["error"]
         assert result["signatures"] == []
+
+
+def test_get_claude_workdir_uses_current_directory():
+    """Test that get_claude_workdir returns current working directory."""
+    from pr_ci_dashboard.utils.ai_analyzer import get_claude_workdir
+    import os
+    
+    # Should return current working directory
+    assert get_claude_workdir() == os.getcwd()
+
+
+def test_get_claude_workdir_respects_env_override():
+    """Test that PR_CI_DASHBOARD_CLAUDE_WORKDIR environment variable overrides default."""
+    from pr_ci_dashboard.utils.ai_analyzer import get_claude_workdir
+    import os
+    
+    override_path = "/tmp/custom/workdir"
+    old_value = os.environ.get('PR_CI_DASHBOARD_CLAUDE_WORKDIR')
+    
+    try:
+        os.environ['PR_CI_DASHBOARD_CLAUDE_WORKDIR'] = override_path
+        assert get_claude_workdir() == override_path
+    finally:
+        # Restore original value
+        if old_value is None:
+            os.environ.pop('PR_CI_DASHBOARD_CLAUDE_WORKDIR', None)
+        else:
+            os.environ['PR_CI_DASHBOARD_CLAUDE_WORKDIR'] = old_value

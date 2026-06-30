@@ -3,8 +3,25 @@ import json
 import os
 import re
 
-# Get project root directory
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def get_claude_workdir():
+    """
+    Get working directory for Claude CLI subprocess.
+
+    After package migration, we use the current process working directory
+    instead of the package installation directory. This allows Claude to:
+    - Access git repository context if running from a git clone
+    - Write to a writable directory (not site-packages)
+    - Use the user's current context
+
+    Can be overridden via PR_CI_DASHBOARD_CLAUDE_WORKDIR environment variable.
+    """
+    override = os.environ.get('PR_CI_DASHBOARD_CLAUDE_WORKDIR')
+    if override:
+        return override
+
+    # Use current working directory (where the user launched the app)
+    return os.getcwd()
 
 
 def analyze_permafail_streaming(job_urls, job_name, pr_info):
@@ -57,7 +74,7 @@ Return ONLY the final JSON result with no additional explanation."""
             stderr=subprocess.PIPE,
             text=True,
             bufsize=0,  # Unbuffered
-            cwd=project_root,
+            cwd=get_claude_workdir(),
             env={**os.environ, 'PYTHONUNBUFFERED': '1'}
         )
 
@@ -244,7 +261,7 @@ Return ONLY the final JSON result with no additional explanation."""
             capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout
-            cwd=project_root  # Run in project directory to access .claude/skills
+            cwd=get_claude_workdir()
         )
 
         if result.returncode != 0:

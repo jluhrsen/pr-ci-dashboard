@@ -3,8 +3,8 @@
 import pytest
 import json
 from unittest.mock import patch
-from server import app
-from utils.db import init_db
+from pr_ci_dashboard.server import app
+from pr_ci_dashboard.utils.db import init_db
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def test_full_permafail_workflow(client, tmp_path):
         "common_tests": ["TestNetworkPolicy/Baseline"]
     }
 
-    with patch('api.analysis.analyze_permafail', return_value=mock_analysis):
+    with patch('pr_ci_dashboard.api.analysis.analyze_permafail', return_value=mock_analysis):
         # Step 1: Trigger analysis via POST /api/jobs/analyze
         job_urls = [
             "https://prow.ci.openshift.org/view/1",

@@ -1,6 +1,6 @@
 """Fetch job status for a PR."""
 from concurrent.futures import ThreadPoolExecutor
-from utils.job_executor import get_e2e_jobs, get_payload_jobs
+from ..utils.job_executor import get_e2e_jobs, get_payload_jobs
 
 
 def get_pr_jobs(owner: str, repo: str, pr_number: int) -> dict:

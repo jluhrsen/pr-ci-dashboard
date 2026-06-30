@@ -1,8 +1,8 @@
 # api/analysis.py
 import json
 from flask import Blueprint, request, jsonify, current_app, Response
-from utils.db import store_analysis, get_permafail_status, get_pr_permafail_status, set_override, delete_cached_analyses, normalize_permafail_result
-from utils.ai_analyzer import analyze_permafail, analyze_permafail_streaming
+from ..utils.db import store_analysis, get_permafail_status, get_pr_permafail_status, set_override, delete_cached_analyses, normalize_permafail_result
+from ..utils.ai_analyzer import analyze_permafail, analyze_permafail_streaming
 
 analysis_bp = Blueprint('analysis', __name__)
 

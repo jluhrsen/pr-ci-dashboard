@@ -1,7 +1,7 @@
 """Execute bash scripts and parse output."""
 import subprocess
 import json
-from utils.script_fetcher import get_script_path
+from .script_fetcher import get_script_path
 
 
 def get_e2e_jobs(repo: str, pr_number: int) -> dict:

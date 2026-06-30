@@ -1,0 +1,9 @@
+# Include Flask templates and static files from package
+recursive-include pr_ci_dashboard/templates *.html
+recursive-include pr_ci_dashboard/static *.js *.css *.svg
+
+# Include bash scripts from package
+recursive-include pr_ci_dashboard/scripts *.sh
+
+# Include license
+include LICENSE
