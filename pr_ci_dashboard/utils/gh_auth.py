@@ -1,4 +1,5 @@
 """Check GitHub CLI authentication status."""
+import os
 import subprocess
 
 
@@ -41,13 +42,21 @@ def check_gh_auth() -> dict:
         }
 
 
-def post_retest_comment(owner: str, repo: str, pr: int, comment_body: str) -> dict:
+def post_retest_comment(owner: str, repo: str, pr: int, comment_body: str, token: str = None) -> dict:
     """
     Post a comment to a PR using gh CLI.
+
+    Args:
+        token: Optional per-user GitHub token. When set, it overrides the
+               process GH_TOKEN so the comment is posted as that user.
 
     Returns:
         {"success": True} or {"error": "message"}
     """
+    env = None
+    if token:
+        env = {**os.environ, "GH_TOKEN": token}
+
     try:
         result = subprocess.run(
             ["gh", "pr", "comment", str(pr),
@@ -55,7 +64,8 @@ def post_retest_comment(owner: str, repo: str, pr: int, comment_body: str) -> di
              "--body", comment_body],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            env=env
         )
 
         if result.returncode != 0:

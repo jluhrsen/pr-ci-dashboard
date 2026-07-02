@@ -12,6 +12,18 @@
         <h1>👻🚫 Flake Buster</h1>
         <button class="btn" id="refresh-btn">Refresh</button>
 
+        <div id="github-connect" class="github-connect hidden">
+            <button class="btn" id="github-connect-btn">Connect GitHub</button>
+            <div id="github-device-code" class="github-device-code hidden">
+                Enter code <strong id="github-user-code"></strong> at
+                <a id="github-verification-link" href="#" target="_blank" rel="noopener">github.com/login/device</a>
+            </div>
+            <div id="github-connected" class="github-connected hidden">
+                Retesting as <strong id="github-login"></strong>
+                <a href="#" id="github-disconnect-link">(disconnect)</a>
+            </div>
+        </div>
+
         <div id="auto-retest-monitor" class="auto-retest-monitor">
             <h3>🔄 Auto-Retest Monitor</h3>
             <div id="monitored-prs-list" class="monitored-prs-list">

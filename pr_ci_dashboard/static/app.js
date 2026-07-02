@@ -63,6 +63,9 @@ async function init() {
     // PR cards, so toggles reflect saved state instead of racing the fetch
     await loadAutoRetestState();
 
+    // Show GitHub connect UI if per-user OAuth is configured server-side
+    initGithubConnect();
+
     // Update auto-retest monitor panel
     updateAutoRetestMonitor();
 
@@ -135,6 +138,119 @@ async function init() {
             }
         }
     });
+}
+
+// ========================================
+// Per-user GitHub OAuth (device flow)
+// ========================================
+let githubPollTimer = null;
+
+function stopGithubPolling() {
+    if (githubPollTimer) {
+        clearTimeout(githubPollTimer);
+        githubPollTimer = null;
+    }
+}
+
+async function initGithubConnect() {
+    try {
+        const status = await fetch('/api/github/oauth/status').then(r => r.json());
+        if (!status.enabled) {
+            return; // feature not configured server-side; keep UI hidden
+        }
+        document.getElementById('github-connect').classList.remove('hidden');
+        renderGithubState(status.connected ? status.login : null);
+
+        document.getElementById('github-connect-btn').addEventListener('click', startGithubConnect);
+        document.getElementById('github-disconnect-link').addEventListener('click', async (e) => {
+            e.preventDefault();
+            stopGithubPolling();
+            await fetch('/api/github/oauth/disconnect', {method: 'POST'});
+            renderGithubState(null);
+            showToast('GitHub disconnected; retests use the shared token again', 'info');
+        });
+    } catch (error) {
+        console.error('Failed to init GitHub connect:', error);
+    }
+}
+
+function renderGithubState(login) {
+    const connectBtn = document.getElementById('github-connect-btn');
+    const deviceCode = document.getElementById('github-device-code');
+    const connected = document.getElementById('github-connected');
+
+    connectBtn.disabled = false;
+    deviceCode.classList.add('hidden');
+    if (login) {
+        connectBtn.classList.add('hidden');
+        connected.classList.remove('hidden');
+        document.getElementById('github-login').textContent = login;
+    } else {
+        connectBtn.classList.remove('hidden');
+        connected.classList.add('hidden');
+    }
+}
+
+async function startGithubConnect() {
+    const connectBtn = document.getElementById('github-connect-btn');
+    if (connectBtn.disabled) {
+        return; // start already in flight
+    }
+    connectBtn.disabled = true;
+    stopGithubPolling(); // never run two poll loops
+
+    try {
+        const response = await fetch('/api/github/oauth/start', {method: 'POST'});
+        const flow = await response.json();
+        if (!response.ok || flow.error) {
+            throw new Error(flow.error || `HTTP ${response.status}`);
+        }
+
+        // Show the code the user must enter on GitHub
+        document.getElementById('github-user-code').textContent = flow.user_code;
+        const link = document.getElementById('github-verification-link');
+        link.href = flow.verification_uri;
+        document.getElementById('github-device-code').classList.remove('hidden');
+        connectBtn.classList.add('hidden');
+
+        // Poll until authorized, denied, or expired
+        let intervalMs = (flow.interval || 5) * 1000;
+        const expiresAt = Date.now() + (flow.expires_in || 900) * 1000;
+
+        const poll = async () => {
+            githubPollTimer = null;
+            if (Date.now() > expiresAt) {
+                // Clear the server-side pending flow too
+                fetch('/api/github/oauth/disconnect', {method: 'POST'}).catch(() => {});
+                renderGithubState(null);
+                showToast('GitHub connect timed out; try again', 'error');
+                return;
+            }
+            try {
+                const result = await fetch('/api/github/oauth/poll', {method: 'POST'}).then(r => r.json());
+                if (result.status === 'success') {
+                    renderGithubState(result.login);
+                    showToast(`GitHub connected as ${result.login}; retests post as you`, 'success');
+                    return;
+                }
+                if (result.status === 'error' || result.error) {
+                    renderGithubState(null);
+                    showToast(`GitHub connect failed: ${result.error}`, 'error');
+                    return;
+                }
+                if (result.status === 'slow_down') {
+                    intervalMs = (result.interval || 10) * 1000;
+                }
+            } catch (error) {
+                console.error('GitHub poll failed:', error);
+            }
+            githubPollTimer = setTimeout(poll, intervalMs);
+        };
+        githubPollTimer = setTimeout(poll, intervalMs);
+    } catch (error) {
+        renderGithubState(null);
+        showToast(`Failed to start GitHub connect: ${error.message}`, 'error');
+    }
 }
 
 async function checkAuth() {

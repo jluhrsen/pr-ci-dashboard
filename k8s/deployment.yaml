@@ -79,12 +79,14 @@ spec:
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /secrets/gcp/sa.json
 
-        # GitHub auth: Future - not yet configured
-        # - name: GITHUB_TOKEN
-        #   valueFrom:
-        #     secretKeyRef:
-        #       name: github-credentials
-        #       key: token
+        # Per-user GitHub OAuth (device flow): set to your GitHub OAuth App
+        # client ID to show the "Connect GitHub" UI; retests then post as the
+        # connected user. The client ID is public, not a secret.
+        # - name: GITHUB_OAUTH_CLIENT_ID
+        #   value: Ov23li...
+
+        # Shared fallback GitHub token (used when a user has not connected):
+        # injected via `oc set env deploy/pr-ci-dashboard --from=secret/github-token`
 
         volumeMounts:
         - name: data

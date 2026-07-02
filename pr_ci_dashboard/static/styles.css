@@ -553,3 +553,26 @@ h1 {
 .monitored-pr-disable:hover {
     background: #c82333;
 }
+
+/* Generic visibility toggle used by JS (github connect, load-more, etc.) */
+.hidden {
+    display: none !important;
+}
+
+/* Per-user GitHub connect (sidebar) */
+.github-connect {
+    margin-top: 0.75rem;
+    font-size: 0.8rem;
+}
+
+.github-device-code,
+.github-connected {
+    margin-top: 0.5rem;
+    color: var(--text-secondary, #ccc);
+    word-break: break-word;
+}
+
+.github-device-code strong {
+    font-size: 1rem;
+    letter-spacing: 0.1em;
+}

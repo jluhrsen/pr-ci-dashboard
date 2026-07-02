@@ -188,7 +188,24 @@ podman run -p 5000:5000 \
 **Requirements:**
 - Mount `/data` for SQLite database persistence
 - Mount GCP service account credentials for Vertex AI
-- GitHub authentication: **Not yet resolved for containerized deployment** - you must configure this separately
+- GitHub authentication: set `GH_TOKEN` for the shared fallback token, and
+  optionally `GITHUB_OAUTH_CLIENT_ID` for per-user retests (see below)
+
+### Per-User GitHub Retests (optional)
+
+With `GITHUB_OAUTH_CLIENT_ID` set, the sidebar shows a **Connect GitHub**
+button. Users authorize via GitHub's device flow (enter a short code at
+github.com/login/device) and their retest comments are posted as *them*
+instead of the shared token identity. Tokens are held in server memory only:
+nothing is persisted, and a restart requires reconnecting.
+
+Setup (one time):
+1. GitHub → Settings → Developer settings → OAuth Apps → New OAuth App
+   (any Homepage/Callback URL works; callback is unused by the device flow)
+2. On the app page, check **Enable Device Flow**
+3. Set the app's Client ID: `oc set env deploy/pr-ci-dashboard GITHUB_OAUTH_CLIENT_ID=<client-id>`
+
+Users who have not connected fall back to the shared `GH_TOKEN`.
 
 ## Kubernetes Deployment
 

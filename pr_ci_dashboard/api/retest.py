@@ -2,7 +2,7 @@
 from ..utils.gh_auth import post_retest_comment
 
 
-def retest_jobs(owner: str, repo: str, pr: int, jobs: list, job_type: str) -> dict:
+def retest_jobs(owner: str, repo: str, pr: int, jobs: list, job_type: str, token: str = None) -> dict:
     """
     Post retest comment for jobs.
 
@@ -12,6 +12,7 @@ def retest_jobs(owner: str, repo: str, pr: int, jobs: list, job_type: str) -> di
         pr: PR number
         jobs: List of job names
         job_type: "e2e" or "payload"
+        token: Optional per-user GitHub token (comment posted as that user)
 
     Returns:
         {"success": True} or {"error": "message"}
@@ -29,4 +30,4 @@ def retest_jobs(owner: str, repo: str, pr: int, jobs: list, job_type: str) -> di
 
     comment_body = "\n".join(lines)
 
-    return post_retest_comment(owner, repo, pr, comment_body)
+    return post_retest_comment(owner, repo, pr, comment_body, token=token)

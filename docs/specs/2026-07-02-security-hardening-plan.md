@@ -26,12 +26,20 @@ Per-user OAuth end-to-end, no shared long-lived secrets:
    deletes it. Verified feasible: user credentials work against
    `<internal-ci-vertex-project>` + `CLOUD_ML_REGION=global` +
    `ANTHROPIC_MODEL=claude-opus-4-6` (model pin required — CLI default model 403s).
-3. **GitHub-as-user:** GitHub OAuth flow; retest comments posted as the clicking
-   user. This makes the dashboard's permission model match Prow's automatically
-   (Prow only honors /test from authorized users).
+3. **GitHub-as-user:** DONE 2026-07-02 (device flow). With
+   `GITHUB_OAUTH_CLIENT_ID` set, users connect via GitHub device flow (no
+   client secret, no callback URL needed) and retest comments post as them;
+   unconnected sessions fall back to the shared pod token. Tokens are held in
+   an in-memory dict keyed by a signed session cookie. See
+   `utils/github_oauth.py` and the /api/github/oauth/* endpoints.
+   Remaining: reads (search/job status) still use the pod token; drop the
+   fallback token entirely once login is mandatory.
 4. **Sessions:** memory-only. No refresh tokens persisted to SQLite/disk. Pod
    restart = users re-login. Documented residual risk: an admin with pod exec can
    access tokens of ACTIVE sessions only.
+   NOTE for the gunicorn migration: the in-memory session dicts are
+   per-process, so multi-worker gunicorn needs a single worker, sticky
+   sessions, or a shared store — decide when swapping the server.
 
 **Interim option (ships faster):** openshift `oauth-proxy` sidecar for
 authentication + shared service-account key for Vertex + per-user GitHub OAuth.

@@ -1,10 +1,13 @@
 """Flask server for PR CI Dashboard."""
 import sys
 import os
+import time
+import secrets as py_secrets
 import argparse
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, session
 from .utils.script_fetcher import fetch_scripts
 from .utils.gh_auth import check_gh_auth
+from .utils import github_oauth
 from .utils.db import init_db, get_auto_retest_state, set_auto_retest_state, DB_PATH
 from .api.search import search_prs
 from .api.jobs import get_pr_jobs
@@ -13,8 +16,57 @@ from .api.analysis import analysis_bp
 
 app = Flask(__name__)
 
+# Session cookie signing key. A random key per process means sessions (and
+# the in-memory GitHub tokens they point at) do not survive a restart, which
+# is the intended memory-only token model.
+app.secret_key = os.environ.get('DASHBOARD_SECRET_KEY') or py_secrets.token_hex(32)
+
 # Configure database path
 app.config['DB_PATH'] = DB_PATH
+
+# In-memory per-session GitHub state (never persisted):
+# sid -> {"token": str, "login": str, "last_seen": float} once connected
+GITHUB_SESSIONS = {}
+# sid -> {"device_code": str, "interval": int, "expires_at": float} while
+# a device flow is pending
+PENDING_DEVICE_FLOWS = {}
+
+# Connected sessions expire after this many seconds of inactivity, so a
+# closed browser doesn't leave its token in server memory indefinitely.
+# Activity (status checks, retests) slides the window.
+GITHUB_SESSION_TTL = int(os.environ.get('GITHUB_SESSION_TTL_SECONDS', 8 * 3600))
+
+
+def _session_id():
+    """Get or create the random ID tying this browser session to server-side state."""
+    if 'sid' not in session:
+        session['sid'] = py_secrets.token_urlsafe(32)
+    return session['sid']
+
+
+def _prune_github_state():
+    """Drop expired pending device flows and idle connected sessions."""
+    now = time.time()
+    for sid in [s for s, flow in PENDING_DEVICE_FLOWS.items()
+                if now > flow.get('expires_at', 0)]:
+        PENDING_DEVICE_FLOWS.pop(sid, None)
+    for sid in [s for s, github in GITHUB_SESSIONS.items()
+                if now > github.get('last_seen', 0) + GITHUB_SESSION_TTL]:
+        GITHUB_SESSIONS.pop(sid, None)
+
+
+def get_session_github():
+    """Return {"token", "login"} for the current session, or None.
+
+    Prunes expired server-side state and slides the TTL window for the
+    session on use.
+    """
+    _prune_github_state()
+    sid = session.get('sid')
+    github = GITHUB_SESSIONS.get(sid) if sid else None
+    if github:
+        github['last_seen'] = time.time()
+    return github
 
 # Register blueprints
 app.register_blueprint(analysis_bp)
@@ -80,8 +132,99 @@ def api_retest():
     if not all([owner, repo, pr, jobs]):
         return jsonify({"error": "Missing required fields"}), 400
 
-    result = retest_jobs(owner, repo, pr, jobs, job_type)
+    # Post as the connected GitHub user when available; otherwise fall back
+    # to the pod-level GH_TOKEN (Phase 1 behavior)
+    github = get_session_github()
+    token = github['token'] if github else None
+
+    result = retest_jobs(owner, repo, pr, jobs, job_type, token=token)
     return jsonify(result)
+
+
+@app.route('/api/github/oauth/status')
+def api_github_oauth_status():
+    """Report whether per-user GitHub OAuth is configured and connected."""
+    client_id = github_oauth.get_client_id()
+    github = get_session_github()
+    return jsonify({
+        "enabled": client_id is not None,
+        "connected": github is not None,
+        "login": github['login'] if github else None
+    })
+
+
+@app.route('/api/github/oauth/start', methods=['POST'])
+def api_github_oauth_start():
+    """Start the GitHub device flow for this session.
+
+    Returns user_code and verification_uri for the user to enter on GitHub.
+    The device_code stays server-side.
+    """
+    client_id = github_oauth.get_client_id()
+    if not client_id:
+        return jsonify({"error": "GitHub OAuth not configured (GITHUB_OAUTH_CLIENT_ID unset)"}), 400
+
+    try:
+        flow = github_oauth.start_device_flow(client_id)
+    except Exception as e:
+        return jsonify({"error": f"Failed to start GitHub device flow: {e}"}), 502
+
+    sid = _session_id()
+    PENDING_DEVICE_FLOWS[sid] = {
+        "device_code": flow['device_code'],
+        "interval": flow.get('interval', 5),
+        "expires_at": time.time() + flow.get('expires_in', 900)
+    }
+
+    return jsonify({
+        "user_code": flow['user_code'],
+        "verification_uri": flow['verification_uri'],
+        "interval": flow.get('interval', 5),
+        "expires_in": flow.get('expires_in', 900)
+    })
+
+
+@app.route('/api/github/oauth/poll', methods=['POST'])
+def api_github_oauth_poll():
+    """Poll the pending device flow once. Called by the frontend on an interval."""
+    _prune_github_state()
+    client_id = github_oauth.get_client_id()
+    sid = session.get('sid')
+    pending = PENDING_DEVICE_FLOWS.get(sid) if sid else None
+    if not client_id or not pending:
+        return jsonify({"error": "No device flow in progress"}), 400
+
+    try:
+        result = github_oauth.poll_device_flow(client_id, pending['device_code'])
+    except Exception as e:
+        return jsonify({"error": f"Failed to poll GitHub: {e}"}), 502
+
+    if result['status'] == 'success':
+        PENDING_DEVICE_FLOWS.pop(sid, None)
+        login = github_oauth.get_github_login(result['token'])
+        if not login:
+            return jsonify({"status": "error", "error": "Token obtained but user lookup failed"})
+        GITHUB_SESSIONS[sid] = {
+            "token": result['token'],
+            "login": login,
+            "last_seen": time.time()
+        }
+        return jsonify({"status": "success", "login": login})
+
+    if result['status'] == 'error':
+        PENDING_DEVICE_FLOWS.pop(sid, None)
+
+    return jsonify(result)
+
+
+@app.route('/api/github/oauth/disconnect', methods=['POST'])
+def api_github_oauth_disconnect():
+    """Drop the session's GitHub token from server memory."""
+    sid = session.get('sid')
+    if sid:
+        GITHUB_SESSIONS.pop(sid, None)
+        PENDING_DEVICE_FLOWS.pop(sid, None)
+    return jsonify({"success": True})
 
 
 @app.route('/api/auto-retest', methods=['GET'])
