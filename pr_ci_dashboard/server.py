@@ -4,10 +4,18 @@ import os
 import time
 import secrets as py_secrets
 import argparse
-from flask import Flask, jsonify, request, render_template, session
+from flask import Flask, jsonify, request, render_template, session, redirect
 from .utils.script_fetcher import fetch_scripts
 from .utils.gh_auth import check_gh_auth
 from .utils import github_oauth
+from .utils import google_oauth
+from .utils.session_store import (
+    GITHUB_SESSIONS, PENDING_DEVICE_FLOWS, GOOGLE_SESSIONS,
+    SESSION_TTL as GITHUB_SESSION_TTL,
+    session_id as _session_id,
+    prune as _prune_github_state,
+    get_session_github, get_session_google,
+)
 from .utils.db import init_db, get_auto_retest_state, set_auto_retest_state, DB_PATH
 from .api.search import search_prs
 from .api.jobs import get_pr_jobs
@@ -17,56 +25,12 @@ from .api.analysis import analysis_bp
 app = Flask(__name__)
 
 # Session cookie signing key. A random key per process means sessions (and
-# the in-memory GitHub tokens they point at) do not survive a restart, which
+# the in-memory OAuth tokens they point at) do not survive a restart, which
 # is the intended memory-only token model.
 app.secret_key = os.environ.get('DASHBOARD_SECRET_KEY') or py_secrets.token_hex(32)
 
 # Configure database path
 app.config['DB_PATH'] = DB_PATH
-
-# In-memory per-session GitHub state (never persisted):
-# sid -> {"token": str, "login": str, "last_seen": float} once connected
-GITHUB_SESSIONS = {}
-# sid -> {"device_code": str, "interval": int, "expires_at": float} while
-# a device flow is pending
-PENDING_DEVICE_FLOWS = {}
-
-# Connected sessions expire after this many seconds of inactivity, so a
-# closed browser doesn't leave its token in server memory indefinitely.
-# Activity (status checks, retests) slides the window.
-GITHUB_SESSION_TTL = int(os.environ.get('GITHUB_SESSION_TTL_SECONDS', 8 * 3600))
-
-
-def _session_id():
-    """Get or create the random ID tying this browser session to server-side state."""
-    if 'sid' not in session:
-        session['sid'] = py_secrets.token_urlsafe(32)
-    return session['sid']
-
-
-def _prune_github_state():
-    """Drop expired pending device flows and idle connected sessions."""
-    now = time.time()
-    for sid in [s for s, flow in PENDING_DEVICE_FLOWS.items()
-                if now > flow.get('expires_at', 0)]:
-        PENDING_DEVICE_FLOWS.pop(sid, None)
-    for sid in [s for s, github in GITHUB_SESSIONS.items()
-                if now > github.get('last_seen', 0) + GITHUB_SESSION_TTL]:
-        GITHUB_SESSIONS.pop(sid, None)
-
-
-def get_session_github():
-    """Return {"token", "login"} for the current session, or None.
-
-    Prunes expired server-side state and slides the TTL window for the
-    session on use.
-    """
-    _prune_github_state()
-    sid = session.get('sid')
-    github = GITHUB_SESSIONS.get(sid) if sid else None
-    if github:
-        github['last_seen'] = time.time()
-    return github
 
 # Register blueprints
 app.register_blueprint(analysis_bp)
@@ -224,6 +188,84 @@ def api_github_oauth_disconnect():
     if sid:
         GITHUB_SESSIONS.pop(sid, None)
         PENDING_DEVICE_FLOWS.pop(sid, None)
+    return jsonify({"success": True})
+
+
+@app.route('/api/google/oauth/status')
+def api_google_oauth_status():
+    """Report whether Google sign-in is configured and connected."""
+    config = google_oauth.get_client_config()
+    google = get_session_google()
+    return jsonify({
+        "enabled": config is not None,
+        "connected": google is not None,
+        "email": google['email'] if google else None
+    })
+
+
+@app.route('/api/google/oauth/login')
+def api_google_oauth_login():
+    """Redirect the browser to Google's consent screen (web flow + PKCE)."""
+    config = google_oauth.get_client_config()
+    if not config:
+        return jsonify({"error": "Google OAuth not configured (GOOGLE_OAUTH_CLIENT_ID/SECRET unset)"}), 400
+    client_id, _ = config
+
+    _session_id()
+    state = py_secrets.token_urlsafe(16)
+    verifier, challenge = google_oauth.make_pkce_pair()
+    # Signed cookie: tamper-proof, and only this browser gets the callback
+    session['google_oauth_state'] = state
+    session['google_oauth_verifier'] = verifier
+
+    redirect_uri = request.host_url.rstrip('/') + '/api/google/oauth/callback'
+    return redirect(google_oauth.build_auth_url(client_id, redirect_uri, state, challenge))
+
+
+@app.route('/api/google/oauth/callback')
+def api_google_oauth_callback():
+    """Handle Google's redirect back: verify state, exchange code, store session."""
+    config = google_oauth.get_client_config()
+    if not config:
+        return jsonify({"error": "Google OAuth not configured"}), 400
+    client_id, client_secret = config
+
+    if request.args.get('error'):
+        # Clear the stale state/verifier so they can't linger
+        session.pop('google_oauth_state', None)
+        session.pop('google_oauth_verifier', None)
+        return redirect('/?google_auth=denied')
+
+    state = request.args.get('state')
+    code = request.args.get('code')
+    expected_state = session.pop('google_oauth_state', None)
+    verifier = session.pop('google_oauth_verifier', None)
+    if not code or not state or not expected_state or state != expected_state or not verifier:
+        return jsonify({"error": "Invalid OAuth state"}), 400
+
+    redirect_uri = request.host_url.rstrip('/') + '/api/google/oauth/callback'
+    try:
+        tokens = google_oauth.exchange_code(client_id, client_secret, code, redirect_uri, verifier)
+    except Exception as e:
+        print(f"[ERROR] Google token exchange failed: {e}")
+        return redirect('/?google_auth=failed')
+
+    email = google_oauth.email_from_id_token(tokens.get('id_token', ''), client_id=client_id) or 'unknown'
+    sid = _session_id()
+    GOOGLE_SESSIONS[sid] = {
+        "adc": google_oauth.build_adc(client_id, client_secret, tokens['refresh_token']),
+        "email": email,
+        "last_seen": time.time()
+    }
+    return redirect('/')
+
+
+@app.route('/api/google/oauth/disconnect', methods=['POST'])
+def api_google_oauth_disconnect():
+    """Drop the session's Google credentials from server memory."""
+    sid = session.get('sid')
+    if sid:
+        GOOGLE_SESSIONS.pop(sid, None)
     return jsonify({"success": True})
 
 

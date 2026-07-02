@@ -576,3 +576,11 @@ h1 {
     font-size: 1rem;
     letter-spacing: 0.1em;
 }
+
+/* Anchor styled as button (Google sign-in link) */
+a.btn {
+    text-decoration: none;
+    display: inline-block;
+    color: white;
+    text-align: center;
+}

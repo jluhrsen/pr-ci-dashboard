@@ -63,8 +63,9 @@ async function init() {
     // PR cards, so toggles reflect saved state instead of racing the fetch
     await loadAutoRetestState();
 
-    // Show GitHub connect UI if per-user OAuth is configured server-side
+    // Show GitHub / Google connect UI if per-user OAuth is configured server-side
     initGithubConnect();
+    initGoogleConnect();
 
     // Update auto-retest monitor panel
     updateAutoRetestMonitor();
@@ -250,6 +251,57 @@ async function startGithubConnect() {
     } catch (error) {
         renderGithubState(null);
         showToast(`Failed to start GitHub connect: ${error.message}`, 'error');
+    }
+}
+
+// ========================================
+// Per-user Google sign-in (web flow)
+// ========================================
+async function initGoogleConnect() {
+    try {
+        const status = await fetch('/api/google/oauth/status').then(r => r.json());
+        if (!status.enabled) {
+            return; // feature not configured server-side; keep UI hidden
+        }
+        document.getElementById('google-connect').classList.remove('hidden');
+        renderGoogleState(status.connected ? status.email : null);
+
+        document.getElementById('google-disconnect-link').addEventListener('click', async (e) => {
+            e.preventDefault();
+            await fetch('/api/google/oauth/disconnect', {method: 'POST'});
+            renderGoogleState(null);
+            showToast('Google signed out; analysis uses the shared credentials again', 'info');
+        });
+
+        // Surface login redirect outcomes (set by the OAuth callback)
+        const params = new URLSearchParams(window.location.search);
+        const outcome = params.get('google_auth');
+        if (outcome) {
+            showToast(outcome === 'denied'
+                ? 'Google sign-in was cancelled'
+                : 'Google sign-in failed; try again', 'error');
+            params.delete('google_auth');
+            const query = params.toString();
+            window.history.replaceState({}, '', query ? `?${query}` : window.location.pathname);
+        } else if (status.connected) {
+            console.log(`Google connected as ${status.email}`);
+        }
+    } catch (error) {
+        console.error('Failed to init Google connect:', error);
+    }
+}
+
+function renderGoogleState(email) {
+    const signinBtn = document.getElementById('google-signin-btn');
+    const connected = document.getElementById('google-connected');
+
+    if (email) {
+        signinBtn.classList.add('hidden');
+        connected.classList.remove('hidden');
+        document.getElementById('google-email').textContent = email;
+    } else {
+        signinBtn.classList.remove('hidden');
+        connected.classList.add('hidden');
     }
 }
 

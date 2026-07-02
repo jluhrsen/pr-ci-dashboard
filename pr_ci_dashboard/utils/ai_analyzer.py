@@ -2,6 +2,40 @@ import subprocess
 import json
 import os
 import re
+import tempfile
+
+
+def build_claude_env(google_adc=None):
+    """
+    Build the env for a `claude` subprocess, optionally as a specific user.
+
+    When google_adc (an authorized_user credentials dict) is given, it is
+    written to a transient file (mode 0600) and GOOGLE_APPLICATION_CREDENTIALS
+    points the subprocess at it, so Vertex calls run as that user. Callers
+    must pass the returned adc_path to cleanup_adc() once the subprocess
+    finishes. Without google_adc, the process env (pod-level credentials)
+    is used unchanged.
+
+    Returns:
+        (env dict, adc_path or None)
+    """
+    env = {**os.environ, 'PYTHONUNBUFFERED': '1'}
+    adc_path = None
+    if google_adc:
+        fd, adc_path = tempfile.mkstemp(prefix='user-adc-', suffix='.json')
+        with os.fdopen(fd, 'w') as f:
+            json.dump(google_adc, f)
+        env['GOOGLE_APPLICATION_CREDENTIALS'] = adc_path
+    return env, adc_path
+
+
+def cleanup_adc(adc_path):
+    """Delete a transient per-user credentials file (no-op for None)."""
+    if adc_path:
+        try:
+            os.unlink(adc_path)
+        except OSError:
+            pass
 
 
 def get_claude_workdir():
@@ -24,7 +58,7 @@ def get_claude_workdir():
     return os.getcwd()
 
 
-def analyze_permafail_streaming(job_urls, job_name, pr_info):
+def analyze_permafail_streaming(job_urls, job_name, pr_info, google_adc=None):
     """
     Analyze job URLs for permafail pattern using ci:detect-permafail command with streaming output
 
@@ -32,6 +66,8 @@ def analyze_permafail_streaming(job_urls, job_name, pr_info):
         job_urls: List of 2-10 consecutive Prow job URLs
         job_name: Name of the job (e.g., "e2e-aws-ovn")
         pr_info: PR identifier (e.g., "openshift/ovn-kubernetes#1234")
+        google_adc: Optional per-user authorized_user credentials dict;
+                    Vertex analysis then runs as that user
 
     Yields:
         str: Lines of output from the Claude CLI process
@@ -65,6 +101,10 @@ Return ONLY the final JSON result with no additional explanation."""
         # Removed --print to see interactive output
     ]
 
+    env, adc_path = build_claude_env(google_adc)
+    process = None
+    stdout_thread = None
+    stderr_thread = None
     try:
         # Use Popen for streaming output
         process = subprocess.Popen(
@@ -75,7 +115,7 @@ Return ONLY the final JSON result with no additional explanation."""
             text=True,
             bufsize=0,  # Unbuffered
             cwd=get_claude_workdir(),
-            env={**os.environ, 'PYTHONUNBUFFERED': '1'}
+            env=env
         )
 
         # Write prompt to stdin and close it
@@ -218,9 +258,36 @@ Return ONLY the final JSON result with no additional explanation."""
                 "signatures": []
             }
         })
+    finally:
+        # Runs on normal completion AND when the SSE client disconnects
+        # (Flask closes the abandoned generator -> GeneratorExit unwinds
+        # through here). The child must not outlive this generator: it would
+        # keep consuming resources for a request nobody is watching, and its
+        # credentials file is deleted below.
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+        for thread in (stdout_thread, stderr_thread):
+            if thread is not None:
+                thread.join(timeout=1)
+        if process is not None:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                try:
+                    if stream:
+                        stream.close()
+                except OSError:
+                    pass
+        cleanup_adc(adc_path)
 
 
-def analyze_permafail(job_urls, job_name, pr_info):
+def analyze_permafail(job_urls, job_name, pr_info, google_adc=None):
     """
     Analyze job URLs for permafail pattern using ci:detect-permafail command from ai-helpers plugin
 
@@ -228,6 +295,8 @@ def analyze_permafail(job_urls, job_name, pr_info):
         job_urls: List of 2-10 consecutive Prow job URLs
         job_name: Name of the job (e.g., "e2e-aws-ovn")
         pr_info: PR identifier (e.g., "openshift/ovn-kubernetes#1234")
+        google_adc: Optional per-user authorized_user credentials dict;
+                    Vertex analysis then runs as that user
 
     Returns:
         dict: Analysis result with permafail verdict and signatures.
@@ -254,6 +323,7 @@ Return ONLY the final JSON result with no additional explanation."""
         '--print'
     ]
 
+    env, adc_path = build_claude_env(google_adc)
     try:
         result = subprocess.run(
             cmd,
@@ -261,7 +331,8 @@ Return ONLY the final JSON result with no additional explanation."""
             capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout
-            cwd=get_claude_workdir()
+            cwd=get_claude_workdir(),
+            env=env
         )
 
         if result.returncode != 0:
@@ -343,3 +414,5 @@ Return ONLY the final JSON result with no additional explanation."""
             "error": error_msg,
             "signatures": []
         }
+    finally:
+        cleanup_adc(adc_path)

@@ -88,6 +88,12 @@ spec:
         # Shared fallback GitHub token (used when a user has not connected):
         # injected via `oc set env deploy/pr-ci-dashboard --from=secret/github-token`
 
+        # Per-user Google sign-in (Vertex-as-user analysis): inject the OAuth
+        # web client credentials via
+        #   `oc set env deploy/pr-ci-dashboard --from=secret/google-oauth`
+        # (secret keys GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET).
+        # Signed-out users fall back to the mounted GCP credentials.
+
         volumeMounts:
         - name: data
           mountPath: /data
@@ -95,6 +101,11 @@ spec:
         - name: gcp-credentials
           mountPath: /secrets/gcp
           readOnly: true
+
+        # RAM-backed /tmp: transient per-user Google credential files for
+        # Vertex-as-user analysis never touch disk
+        - name: tmp
+          mountPath: /tmp
 
         resources:
           requests:
@@ -128,6 +139,11 @@ spec:
       - name: data
         persistentVolumeClaim:
           claimName: dashboard-data
+
+      - name: tmp
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
 
       - name: gcp-credentials
         secret:

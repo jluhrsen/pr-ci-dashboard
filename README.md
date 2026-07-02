@@ -207,6 +207,29 @@ Setup (one time):
 
 Users who have not connected fall back to the shared `GH_TOKEN`.
 
+### Per-User Vertex Analysis via Google Sign-In (optional)
+
+With `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` set, the
+sidebar shows **Sign in with Google**. Users sign in with their redhat.com
+account and permafail analysis runs on Vertex AI *as them* (their IAM, their
+usage attribution). Credentials are memory-only; each analysis writes them to
+a transient file on RAM-backed /tmp for the `claude` subprocess and deletes
+it immediately after.
+
+Setup (one time):
+1. Create your own GCP project (console.cloud.google.com/projectcreate)
+2. OAuth consent screen: External audience; add each user's @redhat.com
+   address under **Test users** (this is the access list while unverified)
+3. Credentials → Create OAuth client ID → **Web application** with authorized
+   redirect URI `http://localhost:5000/api/google/oauth/callback` (everyone
+   accesses via their own localhost port-forward, so one URI serves all users)
+4. `oc create secret generic google-oauth --from-literal=GOOGLE_OAUTH_CLIENT_ID=... --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=...`
+5. `oc set env deploy/pr-ci-dashboard --from=secret/google-oauth`
+
+Signed-out users fall back to the mounted GCP service credentials. Google
+shows a "hasn't verified this app" warning for testing-mode apps — click
+Advanced → continue.
+
 ## Kubernetes Deployment
 
 ### Phase 1 (Current)

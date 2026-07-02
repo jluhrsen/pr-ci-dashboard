@@ -3,6 +3,13 @@ import json
 from flask import Blueprint, request, jsonify, current_app, Response
 from ..utils.db import store_analysis, get_permafail_status, get_pr_permafail_status, set_override, delete_cached_analyses, normalize_permafail_result
 from ..utils.ai_analyzer import analyze_permafail, analyze_permafail_streaming
+from ..utils.session_store import get_session_google
+
+
+def _session_google_adc():
+    """Per-user Google credentials for Vertex, or None (pod-level fallback)."""
+    google = get_session_google()
+    return google['adc'] if google else None
 
 analysis_bp = Blueprint('analysis', __name__)
 
@@ -55,11 +62,12 @@ def analyze_job():
         except ValueError:
             return jsonify({"error": "Invalid PR number: must be an integer"}), 400
 
-        # Run AI analysis
+        # Run AI analysis (as the signed-in Google user when available)
         result = analyze_permafail(
             data["job_urls"],
             data["job_name"],
-            data["pr"]
+            data["pr"],
+            google_adc=_session_google_adc()
         )
         result = normalize_permafail_result(result)
 
@@ -140,18 +148,21 @@ def analyze_job_stream():
         except ValueError:
             return jsonify({"error": "Invalid PR number: must be an integer"}), 400
 
-        # Capture db_path before generator starts (while in Flask request context)
+        # Capture db_path and session credentials before the generator starts
+        # (both need the Flask request context)
         db_path = current_app.config.get('DB_PATH')
+        google_adc = _session_google_adc()
 
         def generate():
             """Generator function for SSE stream"""
             final_result = None
 
-            # Stream analysis output
+            # Stream analysis output (as the signed-in Google user when available)
             for event_json in analyze_permafail_streaming(
                 data["job_urls"],
                 data["job_name"],
-                data["pr"]
+                data["pr"],
+                google_adc=google_adc
             ):
                 event = json.loads(event_json)
 

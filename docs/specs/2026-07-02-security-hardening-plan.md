@@ -18,14 +18,23 @@ individual unless that individual authenticated. Everything below follows from t
 
 Per-user OAuth end-to-end, no shared long-lived secrets:
 
-1. **Login:** "Sign in with Google" (Red Hat runs Google Workspace, so this IS
-   Red Hat SSO). Flask OAuth web flow via `authlib`, `cloud-platform` scope.
-2. **Vertex-as-user:** each user's OAuth token is used for their Claude/Vertex
-   calls. Backend materializes a per-user `authorized_user` credentials file on a
-   RAM-backed emptyDir only for the duration of each `claude` subprocess, then
-   deletes it. Verified feasible: user credentials work against
-   `<internal-ci-vertex-project>` + `CLOUD_ML_REGION=global` +
-   `ANTHROPIC_MODEL=claude-opus-4-6` (model pin required — CLI default model 403s).
+1. **Login:** DONE 2026-07-02. "Sign in with Google" (Red Hat runs Google
+   Workspace, so this IS Red Hat SSO): authorization-code web flow with PKCE
+   and state validation in `utils/google_oauth.py` (stdlib, no authlib dep),
+   using a self-service OAuth client in a personal GCP project (External
+   audience + test-user allowlist; the client's project does NOT need to be
+   the Vertex project). Redirect URI http://localhost:5000/... serves every
+   port-forward user. Remaining: login is optional (attribution, not a wall);
+   making it mandatory is a follow-up.
+2. **Vertex-as-user:** DONE 2026-07-02. The signed-in user's refresh token is
+   packaged as an authorized_user ADC dict (same shape gcloud writes) and
+   materialized to a transient file on RAM-backed /tmp (emptyDir
+   medium: Memory in the deployment) only for the duration of each `claude`
+   subprocess, then deleted. Signed-out sessions fall back to the pod's
+   mounted credentials. Working Vertex combo (verified):
+   `<internal-vertex-project>` + `CLOUD_ML_REGION=global` +
+   `ANTHROPIC_MODEL=claude-opus-4-6` (model pin required — newer CLI default
+   models 403 on some Vertex projects).
 3. **GitHub-as-user:** DONE 2026-07-02 (device flow). With
    `GITHUB_OAUTH_CLIENT_ID` set, users connect via GitHub device flow (no
    client secret, no callback URL needed) and retest comments post as them;
