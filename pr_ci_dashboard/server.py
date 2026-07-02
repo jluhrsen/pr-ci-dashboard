@@ -5,7 +5,7 @@ import argparse
 from flask import Flask, jsonify, request, render_template
 from .utils.script_fetcher import fetch_scripts
 from .utils.gh_auth import check_gh_auth
-from .utils.db import init_db, DB_PATH
+from .utils.db import init_db, get_auto_retest_state, set_auto_retest_state, DB_PATH
 from .api.search import search_prs
 from .api.jobs import get_pr_jobs
 from .api.retest import retest_jobs
@@ -82,6 +82,44 @@ def api_retest():
 
     result = retest_jobs(owner, repo, pr, jobs, job_type)
     return jsonify(result)
+
+
+@app.route('/api/auto-retest', methods=['GET'])
+def api_auto_retest_get():
+    """Get auto-retest enablement for all PRs: {"owner/repo/number": bool, ...}"""
+    try:
+        state = get_auto_retest_state(db_path=app.config.get('DB_PATH'))
+        return jsonify(state)
+    except Exception as e:
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
+
+
+@app.route('/api/auto-retest', methods=['POST'])
+def api_auto_retest_set():
+    """Set auto-retest enablement for a PR.
+
+    Request: {"pr_key": "owner/repo/number", "enabled": bool}
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    pr_key = data.get('pr_key')
+    enabled = data.get('enabled')
+
+    if not isinstance(pr_key, str) or not isinstance(enabled, bool):
+        return jsonify({"error": "pr_key (string) and enabled (bool) required"}), 400
+
+    # pr_key must be "owner/repo/number" with a numeric PR number
+    parts = pr_key.split('/')
+    if len(parts) != 3 or not parts[0] or not parts[1] or not parts[2].isdigit():
+        return jsonify({"error": "pr_key must be owner/repo/number"}), 400
+
+    try:
+        set_auto_retest_state(pr_key, enabled, db_path=app.config.get('DB_PATH'))
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 
 def parse_cli_args(args=None):

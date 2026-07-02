@@ -93,12 +93,11 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
       loop in `ai_analyzer.analyze_permafail_streaming` has no deadline; the
       TimeoutExpired handler is unreachable).
 - [ ] SQLite → PostgreSQL when multi-replica or shared state is needed (Phase 3).
-- [ ] Move auto-retest enablement server-side. It currently lives in browser
-      localStorage (`static/app.js`, key `autoRetestEnabled`), keyed by origin —
-      state doesn't follow users across browsers/machines, leaks between
-      different backends served on the same host:port (e.g. local dev vs a
-      port-forwarded pod), and on a shared deployment each user would have a
-      private view of which jobs auto-retest.
+- [x] Move auto-retest enablement server-side. DONE 2026-07-02: state lives in
+      the `auto_retest` SQLite table via GET/POST `/api/auto-retest`; the
+      frontend migrates any legacy localStorage state to the server once on
+      page load. (Previously browser localStorage keyed by origin — didn't
+      follow users, leaked between backends on the same host:port.)
 - [ ] GitOps delivery (ArgoCD) instead of laptop `oc apply`.
 
 ## Known credential-hygiene debt (Phase 1)

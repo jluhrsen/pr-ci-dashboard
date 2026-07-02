@@ -59,8 +59,9 @@ async function init() {
     DOM.toastContainer = document.getElementById('toast-container');
     DOM.monitoredPrsList = document.getElementById('monitored-prs-list');
 
-    // Load auto-retest state from localStorage
-    loadAutoRetestState();
+    // Load auto-retest state from the server before the first search renders
+    // PR cards, so toggles reflect saved state instead of racing the fetch
+    await loadAutoRetestState();
 
     // Update auto-retest monitor panel
     updateAutoRetestMonitor();
@@ -123,7 +124,7 @@ async function init() {
             const prKey = e.target.dataset.prKey;
             const enabled = e.target.checked;
             autoRetestEnabled.set(prKey, enabled);
-            saveAutoRetestState();
+            saveAutoRetestState(prKey);
 
             if (enabled) {
                 startPollingForPR(prKey);
@@ -149,35 +150,84 @@ async function checkAuth() {
 // ========================================
 // Auto-Retest State Management
 // ========================================
-function loadAutoRetestState() {
+async function loadAutoRetestState() {
     try {
-        const saved = localStorage.getItem('autoRetestEnabled');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            Object.entries(parsed).forEach(([key, val]) => {
-                autoRetestEnabled.set(key, val);
-                // Start polling for all enabled PRs immediately on page load
-                if (val === true) {
-                    startPollingForPR(key);
+        // One-time migration: push any legacy browser-local state to the server.
+        // The browser copy is only removed after every entry migrates, so a
+        // failed/partial migration retries on the next page load.
+        let legacyEntries = null;
+        const legacy = localStorage.getItem('autoRetestEnabled');
+        if (legacy) {
+            legacyEntries = JSON.parse(legacy);
+            let allMigrated = true;
+            for (const [key, val] of Object.entries(legacyEntries)) {
+                try {
+                    const resp = await fetch('/api/auto-retest', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({pr_key: key, enabled: val === true})
+                    });
+                    const body = await resp.json();
+                    if (!resp.ok || body.error) {
+                        allMigrated = false;
+                        console.error(`Failed to migrate auto-retest state for ${key}:`, body.error || resp.status);
+                    }
+                } catch (e) {
+                    allMigrated = false;
+                    console.error(`Failed to migrate auto-retest state for ${key}:`, e);
                 }
-            });
-            console.log(`Loaded auto-retest state for ${Object.keys(parsed).length} PR(s)`);
+            }
+            if (allMigrated) {
+                localStorage.removeItem('autoRetestEnabled');
+                console.log(`Migrated auto-retest state for ${Object.keys(legacyEntries).length} PR(s) to server`);
+                legacyEntries = null;
+            } else {
+                showToast('Some auto-retest state could not be saved to the server; keeping browser copy to retry', 'error');
+            }
         }
+
+        // Auto-retest state lives server-side so it follows the deployment,
+        // not the browser
+        const response = await fetch('/api/auto-retest');
+        const state = await response.json();
+        if (!response.ok || state.error) {
+            throw new Error(state.error || `HTTP ${response.status}`);
+        }
+        // Unmigrated legacy entries still apply for this page load; server
+        // state wins for any key present in both
+        const merged = Object.assign({}, legacyEntries || {}, state);
+        Object.entries(merged).forEach(([key, val]) => {
+            autoRetestEnabled.set(key, val === true);
+            // Start polling for all enabled PRs immediately on page load
+            // (startPollingForPR is a no-op for already-polling PRs)
+            if (val === true) {
+                startPollingForPR(key);
+            }
+        });
+        console.log(`Loaded auto-retest state for ${Object.keys(merged).length} PR(s)`);
     } catch (error) {
         console.error('Failed to load auto-retest state:', error);
     }
 }
 
-function saveAutoRetestState() {
+async function saveAutoRetestState(prKey) {
     try {
-        const obj = {};
-        autoRetestEnabled.forEach((val, key) => {
-            obj[key] = val;
+        const response = await fetch('/api/auto-retest', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                pr_key: prKey,
+                enabled: autoRetestEnabled.get(prKey) === true
+            })
         });
-        localStorage.setItem('autoRetestEnabled', JSON.stringify(obj));
+        const result = await response.json();
+        if (result.error) {
+            throw new Error(result.error);
+        }
         updateAutoRetestMonitor();
     } catch (error) {
         console.error('Failed to save auto-retest state:', error);
+        showToast(`Failed to save auto-retest state: ${error.message}`, 'error');
     }
 }
 
@@ -282,7 +332,7 @@ function jumpToMonitoredPR(owner, repo, number) {
 
 function disableMonitoredPR(prKey) {
     autoRetestEnabled.set(prKey, false);
-    saveAutoRetestState();
+    saveAutoRetestState(prKey);
     stopPollingForPR(prKey);
 
     // Update toggle in UI if PR is visible
@@ -569,7 +619,7 @@ async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck, r
     if (allFailingJobsPermafail) {
         // Disable auto-retest since all failing jobs are permafails
         autoRetestEnabled.set(prKey, false);
-        saveAutoRetestState();
+        saveAutoRetestState(prKey);
         stopPollingForPR(prKey);
 
         // Update UI toggle

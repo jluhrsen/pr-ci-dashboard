@@ -122,6 +122,14 @@ def init_db(db_path=None):
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auto_retest (
+                pr_key TEXT PRIMARY KEY,
+                enabled BOOLEAN NOT NULL CHECK (enabled IN (0, 1)),
+                updated_at TIMESTAMP
+            )
+        """)
+
         conn.commit()
     except sqlite3.Error as e:
         raise RuntimeError(f"Failed to initialize database at {path}: {e}")
@@ -384,6 +392,65 @@ def delete_cached_analyses(job_urls, db_path=None):
         return deleted_count
     except sqlite3.Error as e:
         raise RuntimeError(f"Failed to delete cached analyses: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_auto_retest_state(db_path=None):
+    """
+    Get auto-retest enablement for all PRs
+
+    Args:
+        db_path: Optional database path (defaults to DB_PATH)
+
+    Returns:
+        dict: Map of pr_key ("owner/repo/number") -> bool
+
+    Raises:
+        RuntimeError: If database operation fails
+    """
+    path = db_path or DB_PATH
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT pr_key, enabled FROM auto_retest")
+        return {row[0]: bool(row[1]) for row in cursor.fetchall()}
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to get auto-retest state: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def set_auto_retest_state(pr_key, enabled, db_path=None):
+    """
+    Set auto-retest enablement for a PR
+
+    Args:
+        pr_key: PR identifier ("owner/repo/number")
+        enabled: Whether auto-retest is enabled
+        db_path: Optional database path (defaults to DB_PATH)
+
+    Raises:
+        RuntimeError: If database operation fails
+    """
+    path = db_path or DB_PATH
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT OR REPLACE INTO auto_retest (pr_key, enabled, updated_at)
+            VALUES (?, ?, ?)
+        """, (pr_key, 1 if enabled else 0, datetime.now(UTC).isoformat()))
+
+        conn.commit()
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to set auto-retest state for {pr_key}: {e}")
     finally:
         if conn:
             conn.close()
