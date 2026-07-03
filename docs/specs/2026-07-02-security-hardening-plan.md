@@ -118,7 +118,9 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
       (Claude subprocess cost); 429 on breach. tests/test_audit_rate_limit.py.
 - [ ] Token handling: RAM-backed emptyDir (`medium: Memory`) for transient
       credential files; scrub after subprocess exit; never log tokens.
-- [ ] Dependency/CVE scanning in CI for the image; rebuild cadence for base image.
+- [ ] Dependency/CVE scanning in CI for the image; rebuild cadence for base
+      image. (CI image BUILDS exist as of 2026-07-03 - .github/workflows/ci.yaml
+      tests every push/PR and pushes quay images from main; scanning still todo.)
 - [ ] NetworkPolicy restricting ingress to the Route/oauth-proxy.
 - [x] Probes on lightweight `/healthz`. DONE 2026-07-03: process + DB check,
       never login-gated; k8s liveness/readiness switched to it. Resource

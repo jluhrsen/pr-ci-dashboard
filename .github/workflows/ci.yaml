@@ -1,0 +1,91 @@
+# CI: run the test suite on every push/PR; build and push the container
+# image to quay on pushes to main.
+#
+# Image publishing requires repository secrets (Settings -> Secrets and
+# variables -> Actions):
+#   QUAY_USERNAME / QUAY_PASSWORD  - quay.io robot or user credentials
+#   CI_REGISTRY_USERNAME / CI_REGISTRY_TOKEN (optional) - credentials for
+#     registry.ci.openshift.org, needed to pull the Containerfile base image.
+# Without the quay secrets the build job skips cleanly, so this workflow is
+# safe to merge before any secrets exist.
+
+name: CI
+
+# Tests run on every push (any branch) and every PR; image publishing stays
+# main-only via the build-and-push job condition
+on:
+  push:
+  pull_request:
+
+env:
+  IMAGE: quay.io/jluhrsen/pr-ci-dashboard
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package with test dependencies
+        run: pip install -e '.[dev]'
+
+      - name: Run test suite
+        run: python -m pytest tests/ -v
+
+      - name: Syntax-check frontend JS
+        run: node --check pr_ci_dashboard/static/app.js
+
+  build-and-push:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check publishing credentials
+        id: creds
+        env:
+          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+        run: |
+          if [ -n "$QUAY_USERNAME" ] && [ -n "$QUAY_PASSWORD" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::QUAY_USERNAME/QUAY_PASSWORD secrets not configured; skipping image build/push"
+          fi
+
+      # Credentials go through step env + --password-stdin: never in argv,
+      # never interpolated into shell text (quoting-safe for any secret value)
+      - name: Log in to quay.io
+        if: steps.creds.outputs.have == 'true'
+        env:
+          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+        run: printf '%s' "$QUAY_PASSWORD" | podman login --username "$QUAY_USERNAME" --password-stdin quay.io
+
+      - name: Log in to registry.ci.openshift.org (base image)
+        if: steps.creds.outputs.have == 'true'
+        env:
+          CI_REGISTRY_USERNAME: ${{ secrets.CI_REGISTRY_USERNAME }}
+          CI_REGISTRY_TOKEN: ${{ secrets.CI_REGISTRY_TOKEN }}
+        run: |
+          if [ -n "$CI_REGISTRY_TOKEN" ]; then
+            printf '%s' "$CI_REGISTRY_TOKEN" | podman login --username "${CI_REGISTRY_USERNAME:-unused}" --password-stdin registry.ci.openshift.org
+          else
+            echo "::notice::CI_REGISTRY_TOKEN not configured; base image pull will fail unless it is public/cached"
+          fi
+
+      - name: Build image
+        if: steps.creds.outputs.have == 'true'
+        run: podman build -f Containerfile -t "$IMAGE:latest" -t "$IMAGE:${GITHUB_SHA::12}" .
+
+      - name: Push image
+        if: steps.creds.outputs.have == 'true'
+        run: |
+          podman push "$IMAGE:latest"
+          podman push "$IMAGE:${GITHUB_SHA::12}"

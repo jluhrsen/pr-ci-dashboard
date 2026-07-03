@@ -157,6 +157,22 @@ pr-ci-dashboard --db-path /custom/path/dashboard.db --port 5000
 - **Scripts**: Bash scripts installed as package data for PR search and job retesting
 - **Auth**: Uses local `gh` CLI credentials (no OAuth setup needed)
 
+## Continuous Integration
+
+GitHub Actions (`.github/workflows/ci.yaml`) runs the test suite on every
+push and PR. On pushes to `main` it also builds the Containerfile and pushes
+`quay.io/jluhrsen/pr-ci-dashboard:latest` (plus a commit-SHA tag), replacing
+laptop `podman push` as the image source.
+
+One-time setup — add repository Actions secrets:
+- `QUAY_USERNAME` / `QUAY_PASSWORD` — quay.io credentials (a robot account
+  with write access to the repo is ideal). Without these the build job skips
+  cleanly.
+- `CI_REGISTRY_USERNAME` / `CI_REGISTRY_TOKEN` (optional) — credentials for
+  `registry.ci.openshift.org` to pull the base image. Note human SSO tokens
+  there expire daily; a long-lived pull credential (e.g. an image-puller
+  service account) is needed for unattended builds.
+
 ## Container Deployment
 
 ### Build Container Image
