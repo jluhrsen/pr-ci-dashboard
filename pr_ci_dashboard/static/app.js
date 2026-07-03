@@ -36,13 +36,23 @@ let contextMenuTarget = null;
 let csrfToken = null;
 
 const _originalFetch = window.fetch.bind(window);
-window.fetch = (url, options = {}) => {
+window.fetch = async (url, options = {}) => {
     const method = (options.method || 'GET').toUpperCase();
     if (csrfToken && method !== 'GET' && typeof url === 'string' && url.startsWith('/api/')) {
         options = {...options, headers: {...(options.headers || {}), 'X-CSRF-Token': csrfToken}};
     }
-    return _originalFetch(url, options);
+    const response = await _originalFetch(url, options);
+    // Mandatory-login mode: any API 401 (including mid-session expiry)
+    // drops the user at the sign-in gate
+    if (response.status === 401 && typeof url === 'string' && url.startsWith('/api/')) {
+        showLoginGate();
+    }
+    return response;
 };
+
+function showLoginGate() {
+    document.getElementById('login-gate').classList.remove('hidden');
+}
 
 async function initCsrf() {
     try {
@@ -88,6 +98,18 @@ async function init() {
     // CSRF token must exist before any state-changing request (including the
     // auto-retest localStorage migration below)
     await initCsrf();
+
+    // Mandatory-login mode: stop here and show the gate; nothing else loads
+    // until the user signs in (the OAuth callback reloads the page)
+    try {
+        const googleStatus = await fetch('/api/google/oauth/status').then(r => r.json());
+        if (googleStatus.login_required && !googleStatus.connected) {
+            showLoginGate();
+            return;
+        }
+    } catch (error) {
+        console.error('Failed to check login requirement:', error);
+    }
 
     // Load auto-retest state from the server before the first search renders
     // PR cards, so toggles reflect saved state instead of racing the fetch

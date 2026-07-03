@@ -600,3 +600,38 @@ a.btn {
     word-break: break-word;
     white-space: pre-wrap;
 }
+
+/* Mandatory-login gate overlay */
+.login-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    background: var(--bg-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login-gate-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem 3rem;
+    text-align: center;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.login-gate-box h2 {
+    color: var(--primary);
+    margin-bottom: 0.5rem;
+}
+
+.login-gate-box p {
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+}
+
+.login-gate-box .btn {
+    font-size: 0.9rem;
+    padding: 0.5rem 1.5rem;
+}

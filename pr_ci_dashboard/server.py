@@ -58,6 +58,36 @@ def api_csrf_token():
     return jsonify({"token": token})
 
 
+def _login_required_enabled():
+    """Mandatory-login gate: DASHBOARD_REQUIRE_LOGIN truthy AND Google OAuth
+    configured (the gate is meaningless without a way to log in)."""
+    flag = os.environ.get('DASHBOARD_REQUIRE_LOGIN', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    return flag and google_oauth.get_client_config() is not None
+
+
+# Paths that must work before login: the login flow itself, the CSRF token
+# (session-bound, needed for the first POST after login), and health probes
+LOGIN_EXEMPT_PREFIXES = ('/api/google/oauth/', '/healthz')
+LOGIN_EXEMPT_PATHS = ('/api/csrf-token',)
+
+
+@app.before_request
+def require_login():
+    """With DASHBOARD_REQUIRE_LOGIN on, every API endpoint needs a signed-in
+    Google session. Non-API paths (index, static) stay reachable so the
+    sign-in UI can render; the frontend gates itself on 401s."""
+    if not _login_required_enabled():
+        return None
+    path = request.path
+    if not path.startswith('/api/'):
+        return None
+    if path in LOGIN_EXEMPT_PATHS or any(path.startswith(p) for p in LOGIN_EXEMPT_PREFIXES):
+        return None
+    if get_session_google() is None:
+        return jsonify({"error": "login_required"}), 401
+    return None
+
+
 @app.before_request
 def csrf_protect():
     """Reject state-changing API requests without a valid session CSRF token.
@@ -264,7 +294,8 @@ def api_google_oauth_status():
     return jsonify({
         "enabled": config is not None,
         "connected": google is not None,
-        "email": google['email'] if google else None
+        "email": google['email'] if google else None,
+        "login_required": _login_required_enabled()
     })
 
 

@@ -94,6 +94,11 @@ spec:
         # (secret keys GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET).
         # Signed-out users fall back to the mounted GCP credentials.
 
+        # Mandatory login: with Google OAuth configured, set to require a
+        # signed-in Google session for all API access (sign-in gate in the UI)
+        # - name: DASHBOARD_REQUIRE_LOGIN
+        #   value: "1"
+
         volumeMounts:
         - name: data
           mountPath: /data

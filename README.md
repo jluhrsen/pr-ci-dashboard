@@ -230,6 +230,11 @@ Signed-out users fall back to the mounted GCP service credentials. Google
 shows a "hasn't verified this app" warning for testing-mode apps — click
 Advanced → continue.
 
+**Mandatory login:** set `DASHBOARD_REQUIRE_LOGIN=1` (with Google OAuth
+configured) to require sign-in for all API access. Unauthenticated visitors
+get a sign-in gate; every API call returns 401 until they log in. Without
+the flag, sign-in stays optional (attribution only).
+
 ## Kubernetes Deployment
 
 ### Phase 1 (Current)

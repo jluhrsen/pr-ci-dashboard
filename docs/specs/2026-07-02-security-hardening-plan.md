@@ -24,8 +24,9 @@ Per-user OAuth end-to-end, no shared long-lived secrets:
    using a self-service OAuth client in a personal GCP project (External
    audience + test-user allowlist; the client's project does NOT need to be
    the Vertex project). Redirect URI http://localhost:5000/... serves every
-   port-forward user. Remaining: login is optional (attribution, not a wall);
-   making it mandatory is a follow-up.
+   port-forward user. Mandatory mode DONE 2026-07-03: DASHBOARD_REQUIRE_LOGIN=1
+   gates every API endpoint behind a signed-in Google session (401 +
+   frontend sign-in gate); login/csrf/healthz paths exempt.
 2. **Vertex-as-user:** DONE 2026-07-02. The signed-in user's refresh token is
    packaged as an authorized_user ADC dict (same shape gcloud writes) and
    materialized to a transient file on RAM-backed /tmp (emptyDir
@@ -102,8 +103,9 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
         `pr_ci_dashboard/scripts/*.sh`.
       Injection surfaces: subprocess args, bash script interpolation, and prompt
       injection into the Claude CLI analysis prompt.
-- [ ] **Authorization on every API endpoint** once login exists (session required;
-      no anonymous retest/analyze/override).
+- [x] **Authorization on every API endpoint.** DONE 2026-07-03 via
+      DASHBOARD_REQUIRE_LOGIN=1 (see login gate above); default remains off
+      for Phase 1 port-forward compatibility. tests/test_login_gate.py.
 
 ## Hardening (expected in review, not launch-blocking)
 

@@ -116,7 +116,7 @@ def test_status_disabled(client, monkeypatch):
     monkeypatch.delenv('GOOGLE_OAUTH_CLIENT_ID', raising=False)
     monkeypatch.delenv('GOOGLE_OAUTH_CLIENT_SECRET', raising=False)
     status = client.get('/api/google/oauth/status').get_json()
-    assert status == {"enabled": False, "connected": False, "email": None}
+    assert status == {"enabled": False, "connected": False, "email": None, "login_required": False}
 
 
 def test_login_requires_config(client, monkeypatch):
@@ -160,7 +160,7 @@ def test_callback_success_stores_session(client, oauth_env):
     assert response.location.endswith('/')
 
     status = client.get('/api/google/oauth/status').get_json()
-    assert status == {"enabled": True, "connected": True, "email": "jluhrsen@redhat.com"}
+    assert status == {"enabled": True, "connected": True, "email": "jluhrsen@redhat.com", "login_required": False}
 
     # State/verifier are single-use: replaying the callback fails
     assert client.get(f'/api/google/oauth/callback?code=abc&state={state}').status_code == 400
