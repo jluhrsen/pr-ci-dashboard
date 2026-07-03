@@ -17,6 +17,7 @@ from .utils.session_store import (
     get_session_github, get_session_google,
 )
 from .utils.db import init_db, get_auto_retest_state, set_auto_retest_state, DB_PATH
+from .utils import validation
 from .api.search import search_prs
 from .api.jobs import get_pr_jobs
 from .api.retest import retest_jobs
@@ -116,6 +117,12 @@ def api_search():
     page = data.get('page', 1)
     per_page = data.get('per_page', 10)
 
+    if not isinstance(query, str) or len(query) > 512:
+        return jsonify({"error": "Invalid query"}), 400
+    if not isinstance(page, int) or not isinstance(per_page, int) \
+            or page < 1 or not (1 <= per_page <= 100):
+        return jsonify({"error": "Invalid pagination"}), 400
+
     result = search_prs(query, page, per_page)
     return jsonify(result)
 
@@ -123,6 +130,11 @@ def api_search():
 @app.route('/api/pr/<owner>/<repo>/<int:pr_number>')
 def api_pr_jobs(owner, repo, pr_number):
     """Get job status for a PR."""
+    # owner/repo become bash script arguments
+    if not validation.valid_name(owner) or not validation.valid_name(repo) \
+            or not validation.valid_pr_number(pr_number):
+        return jsonify({"error": "Invalid owner/repo/PR"}), 400
+
     result = get_pr_jobs(owner, repo, pr_number)
     return jsonify(result)
 
@@ -140,6 +152,14 @@ def api_retest():
 
     if not all([owner, repo, pr, jobs]):
         return jsonify({"error": "Missing required fields"}), 400
+
+    # These values become gh CLI arguments and PR comment content
+    if not validation.valid_name(owner) or not validation.valid_name(repo):
+        return jsonify({"error": "Invalid owner/repo"}), 400
+    if not validation.valid_pr_number(pr):
+        return jsonify({"error": "Invalid PR number"}), 400
+    if not isinstance(jobs, list) or not all(validation.valid_job_name(j) for j in jobs):
+        return jsonify({"error": "Invalid job name(s)"}), 400
 
     # Post as the connected GitHub user when available; otherwise fall back
     # to the pod-level GH_TOKEN (Phase 1 behavior)

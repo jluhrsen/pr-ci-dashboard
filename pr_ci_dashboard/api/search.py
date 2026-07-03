@@ -33,7 +33,12 @@ def search_prs(query: str, page: int = 1, per_page: int = 10) -> dict:
         # GitHub CLI doesn't support pagination, so fetch more results upfront
         # Note: GitHub API limits search results to 1000 max
         query_args = shlex.split(query) if query else []
-        cmd = ["gh", "search", "prs"] + query_args + ["--limit", "1000", "--json", "number,title,repository,author,createdAt,state"]
+        # Our flags come first, then "--" so user query tokens can never be
+        # parsed as gh CLI flags (search negation like -label:foo still works)
+        cmd = ["gh", "search", "prs",
+               "--limit", "1000",
+               "--json", "number,title,repository,author,createdAt,state",
+               "--"] + query_args
 
         result = subprocess.run(
             cmd,

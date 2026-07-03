@@ -39,9 +39,9 @@ def test_full_permafail_workflow(client, tmp_path):
     with patch('pr_ci_dashboard.api.analysis.analyze_permafail', return_value=mock_analysis):
         # Step 1: Trigger analysis via POST /api/jobs/analyze
         job_urls = [
-            "https://prow.ci.openshift.org/view/1",
-            "https://prow.ci.openshift.org/view/2",
-            "https://prow.ci.openshift.org/view/3"
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/3"
         ]
 
         response = client.post(

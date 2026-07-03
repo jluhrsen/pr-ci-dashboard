@@ -25,9 +25,9 @@ def test_analyze_endpoint_triggers_analysis(client, tmp_path):
         "repo": "openshift/ovn-kubernetes",
         "job_name": "e2e-aws-ovn",
         "job_urls": [
-            "https://prow.ci.openshift.org/view/1",
-            "https://prow.ci.openshift.org/view/2",
-            "https://prow.ci.openshift.org/view/3"
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/3"
         ]
     }
 
@@ -68,9 +68,9 @@ def test_analyze_endpoint_normalizes_is_permafail_result(client, tmp_path):
         "repo": "openshift/ovn-kubernetes",
         "job_name": "e2e-aws-ovn",
         "job_urls": [
-            "https://prow.ci.openshift.org/view/1",
-            "https://prow.ci.openshift.org/view/2",
-            "https://prow.ci.openshift.org/view/3"
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/3"
         ]
     }
 
@@ -104,9 +104,9 @@ def test_analyze_endpoint_normalizes_verdict_permafail_result(client, tmp_path):
         "repo": "openshift/ovn-kubernetes",
         "job_name": "e2e-aws-ovn-local-gateway",
         "job_urls": [
-            "https://prow.ci.openshift.org/view/1",
-            "https://prow.ci.openshift.org/view/2",
-            "https://prow.ci.openshift.org/view/3"
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/3"
         ]
     }
 
@@ -178,7 +178,7 @@ def test_analyze_endpoint_wrong_number_of_urls(client):
         "repo": "openshift/ovn-kubernetes",
         "job_name": "e2e-aws-ovn",
         "job_urls": [
-            "https://prow.ci.openshift.org/view/1"
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1"
         ]
     }
     response = client.post(
@@ -192,7 +192,7 @@ def test_analyze_endpoint_wrong_number_of_urls(client):
     assert "2 to 10 job URLs required" in data["error"]
 
     # Test with 11 URLs (too many)
-    request_data["job_urls"] = [f"https://prow.ci.openshift.org/view/{i}" for i in range(11)]
+    request_data["job_urls"] = [f"https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/{i}" for i in range(11)]
     response = client.post(
         '/api/jobs/analyze',
         data=json.dumps(request_data),
@@ -210,9 +210,9 @@ def test_analyze_endpoint_invalid_pr_format(client):
         "repo": "openshift/ovn-kubernetes",
         "job_name": "e2e-aws-ovn",
         "job_urls": [
-            "https://prow.ci.openshift.org/view/1",
-            "https://prow.ci.openshift.org/view/2",
-            "https://prow.ci.openshift.org/view/3"
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/3"
         ]
     }
     response = client.post(
@@ -244,9 +244,9 @@ def test_analyze_endpoint_database_failure(client, tmp_path):
         "repo": "openshift/ovn-kubernetes",
         "job_name": "e2e-aws-ovn",
         "job_urls": [
-            "https://prow.ci.openshift.org/view/1",
-            "https://prow.ci.openshift.org/view/2",
-            "https://prow.ci.openshift.org/view/3"
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/3"
         ]
     }
 
@@ -276,7 +276,7 @@ def test_override_endpoint_clears_permafail(client, tmp_path):
 
     # Store a permafail result
     store_analysis(
-        job_url="https://prow.ci.openshift.org/view/12345",
+        job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/12345",
         pr_number=1234,
         repo="openshift/ovn-kubernetes",
         job_name="e2e-aws-ovn",
@@ -287,7 +287,7 @@ def test_override_endpoint_clears_permafail(client, tmp_path):
 
     response = client.post(
         '/api/jobs/override',
-        data=json.dumps({"job_url": "https://prow.ci.openshift.org/view/12345"}),
+        data=json.dumps({"job_url": "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/12345"}),
         content_type='application/json'
     )
 
@@ -302,7 +302,7 @@ def test_status_endpoint_returns_batch_status(client, tmp_path):
 
     # Store two results
     store_analysis(
-        job_url="https://prow.ci.openshift.org/view/1",
+        job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
         pr_number=1234,
         repo="openshift/ovn-kubernetes",
         job_name="e2e-aws-ovn",
@@ -312,7 +312,7 @@ def test_status_endpoint_returns_batch_status(client, tmp_path):
     )
 
     store_analysis(
-        job_url="https://prow.ci.openshift.org/view/2",
+        job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
         pr_number=1234,
         repo="openshift/ovn-kubernetes",
         job_name="e2e-gcp-ovn",
@@ -323,19 +323,19 @@ def test_status_endpoint_returns_batch_status(client, tmp_path):
 
     response = client.get(
         '/api/jobs/status?job_urls=' + json.dumps([
-            "https://prow.ci.openshift.org/view/1",
-            "https://prow.ci.openshift.org/view/2"
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
+            "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2"
         ])
     )
 
     assert response.status_code == 200
     data = json.loads(response.data)
 
-    assert "https://prow.ci.openshift.org/view/1" in data
-    assert data["https://prow.ci.openshift.org/view/1"]["permafail"] is True
+    assert "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1" in data
+    assert data["https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1"]["permafail"] is True
 
-    assert "https://prow.ci.openshift.org/view/2" in data
-    assert data["https://prow.ci.openshift.org/view/2"]["permafail"] is False
+    assert "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2" in data
+    assert data["https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2"]["permafail"] is False
 
 
 def test_override_endpoint_invalid_json(client):
@@ -369,7 +369,7 @@ def test_override_endpoint_database_failure(client):
     with patch('pr_ci_dashboard.api.analysis.set_override', side_effect=RuntimeError("DB operation failed")):
         response = client.post(
             '/api/jobs/override',
-            data=json.dumps({"job_url": "https://prow.ci.openshift.org/view/12345"}),
+            data=json.dumps({"job_url": "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/12345"}),
             content_type='application/json'
         )
 
@@ -404,7 +404,7 @@ def test_status_endpoint_database_failure(client):
     with patch('pr_ci_dashboard.api.analysis.get_permafail_status', side_effect=RuntimeError("DB query failed")):
         response = client.get(
             '/api/jobs/status?job_urls=' + json.dumps([
-                "https://prow.ci.openshift.org/view/1"
+                "https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1"
             ])
         )
 
@@ -422,7 +422,7 @@ def test_pr_permafails_endpoint_returns_grouped_jobs(client):
 
     # Store permafails for PR 1234
     store_analysis(
-        job_url="https://prow.ci.openshift.org/view/1",
+        job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
         pr_number=1234,
         repo="openshift/ovn-kubernetes",
         job_name="e2e-aws-ovn",
@@ -431,7 +431,7 @@ def test_pr_permafails_endpoint_returns_grouped_jobs(client):
         db_path=db_path
     )
     store_analysis(
-        job_url="https://prow.ci.openshift.org/view/2",
+        job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
         pr_number=1234,
         repo="openshift/ovn-kubernetes",
         job_name="e2e-aws-ovn",
@@ -440,7 +440,7 @@ def test_pr_permafails_endpoint_returns_grouped_jobs(client):
         db_path=db_path
     )
     store_analysis(
-        job_url="https://prow.ci.openshift.org/view/3",
+        job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/3",
         pr_number=1234,
         repo="openshift/ovn-kubernetes",
         job_name="e2e-metal-ipi",
@@ -479,7 +479,7 @@ def test_pr_permafails_endpoint_filters_by_pr(client):
 
     # Store permafail for PR 1234
     store_analysis(
-        job_url="https://prow.ci.openshift.org/view/1",
+        job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/1",
         pr_number=1234,
         repo="openshift/ovn-kubernetes",
         job_name="e2e-aws-ovn",
@@ -490,7 +490,7 @@ def test_pr_permafails_endpoint_filters_by_pr(client):
 
     # Store permafail for PR 5678
     store_analysis(
-        job_url="https://prow.ci.openshift.org/view/2",
+        job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs/2",
         pr_number=5678,
         repo="openshift/ovn-kubernetes",
         job_name="e2e-metal-ipi",

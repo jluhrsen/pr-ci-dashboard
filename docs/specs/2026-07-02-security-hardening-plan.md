@@ -85,8 +85,16 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
       X-CSRF-Token everywhere. tests/test_csrf.py covers missing/wrong/valid
       token, cross-session token reuse, GETs unaffected, blueprint coverage.
 - [ ] **OAuth flows via `authlib` with PKCE + state validation.** Never hand-roll.
-- [ ] **Input validation audit.** Backend shells out to bash scripts and builds
-      Claude prompts from request JSON. Validate:
+- [x] **Input validation audit.** DONE 2026-07-03: utils/validation.py
+      (reject-not-sanitize) enforced at every endpoint whose inputs reach a
+      subprocess or the Claude prompt — retest (owner/repo/pr/job names),
+      pr-jobs path params, analyze + analyze-stream (prow.ci.openshift.org
+      URL allowlist, repo, job name, PR format), search (length + pagination
+      bounds, and gh CLI flag injection blocked via `--` separator with our
+      flags first). Script-side quoting audited: all args passed as
+      subprocess lists, bash scripts quote and re-validate PR numbers.
+      tests/test_validation.py covers module + endpoint enforcement.
+      Original checklist follows:
       - `job_urls`: must match `https://prow.ci.openshift.org/view/...` (allowlist
         prefix), reject anything else before it reaches a prompt or script.
       - `owner`/`repo`/`pr`: strict `[A-Za-z0-9_.-]+` / integer.

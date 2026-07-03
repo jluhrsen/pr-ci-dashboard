@@ -4,12 +4,56 @@ from flask import Blueprint, request, jsonify, current_app, Response
 from ..utils.db import store_analysis, get_permafail_status, get_pr_permafail_status, set_override, delete_cached_analyses, normalize_permafail_result
 from ..utils.ai_analyzer import analyze_permafail, analyze_permafail_streaming
 from ..utils.session_store import get_session_google
+from ..utils import validation
 
 
 def _session_google_adc():
     """Per-user Google credentials for Vertex, or None (pod-level fallback)."""
     google = get_session_google()
     return google['adc'] if google else None
+
+
+def _validate_analyze_request(data):
+    """Validate an analyze request body. These values are embedded in the
+    Claude analysis prompt and determine which artifacts get fetched, so
+    they are strictly checked.
+
+    Returns:
+        (pr_number, None) on success, (None, (response, status)) on failure
+    """
+    if not data:
+        return None, (jsonify({"error": "Invalid JSON"}), 400)
+
+    for field in ["pr", "repo", "job_name", "job_urls"]:
+        if field not in data:
+            return None, (jsonify({"error": f"Missing field: {field}"}), 400)
+
+    # Allow 2-10 URLs for permafail detection patterns:
+    # - 3/3 (100% match in last 3)
+    # - 4/5 (80% match in last 5)
+    # - 7/10 (70% match in last 10)
+    if not isinstance(data["job_urls"], list) or not (2 <= len(data["job_urls"]) <= 10):
+        return None, (jsonify({"error": "2 to 10 job URLs required"}), 400)
+    if not validation.valid_job_urls(data["job_urls"]):
+        return None, (jsonify({"error": f"Job URLs must start with {validation.JOB_URL_PREFIX}"}), 400)
+
+    if not validation.valid_repo_full(data["repo"]):
+        return None, (jsonify({"error": "Invalid repo"}), 400)
+    if not validation.valid_job_name(data["job_name"]):
+        return None, (jsonify({"error": "Invalid job name"}), 400)
+
+    # PR format: "owner/repo#123"
+    pr_parts = data["pr"].split("#") if isinstance(data["pr"], str) else []
+    if len(pr_parts) != 2 or not validation.valid_repo_full(pr_parts[0]):
+        return None, (jsonify({"error": "Invalid PR format"}), 400)
+    try:
+        pr_number = int(pr_parts[1])
+    except ValueError:
+        return None, (jsonify({"error": "Invalid PR number: must be an integer"}), 400)
+    if not validation.valid_pr_number(pr_number):
+        return None, (jsonify({"error": "Invalid PR number"}), 400)
+
+    return pr_number, None
 
 analysis_bp = Blueprint('analysis', __name__)
 
@@ -37,30 +81,9 @@ def analyze_job():
         return jsonify({"error": "Invalid JSON"}), 400
 
     try:
-        if not data:
-            return jsonify({"error": "Invalid JSON"}), 400
-
-        required_fields = ["pr", "repo", "job_name", "job_urls"]
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"error": f"Missing field: {field}"}), 400
-
-        # Allow 2-10 URLs for permafail detection patterns:
-        # - 3/3 (100% match in last 3)
-        # - 4/5 (80% match in last 5)
-        # - 7/10 (70% match in last 10)
-        if len(data["job_urls"]) < 2 or len(data["job_urls"]) > 10:
-            return jsonify({"error": "2 to 10 job URLs required"}), 400
-
-        # Parse PR info
-        pr_parts = data["pr"].split("#")
-        if len(pr_parts) != 2:
-            return jsonify({"error": "Invalid PR format"}), 400
-
-        try:
-            pr_number = int(pr_parts[1])
-        except ValueError:
-            return jsonify({"error": "Invalid PR number: must be an integer"}), 400
+        pr_number, error = _validate_analyze_request(data)
+        if error:
+            return error
 
         # Run AI analysis (as the signed-in Google user when available)
         result = analyze_permafail(
@@ -127,26 +150,9 @@ def analyze_job_stream():
         return jsonify({"error": "Invalid JSON"}), 400
 
     try:
-        if not data:
-            return jsonify({"error": "Invalid JSON"}), 400
-
-        required_fields = ["pr", "repo", "job_name", "job_urls"]
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"error": f"Missing field: {field}"}), 400
-
-        if len(data["job_urls"]) < 2 or len(data["job_urls"]) > 10:
-            return jsonify({"error": "2 to 10 job URLs required"}), 400
-
-        # Parse PR info
-        pr_parts = data["pr"].split("#")
-        if len(pr_parts) != 2:
-            return jsonify({"error": "Invalid PR format"}), 400
-
-        try:
-            pr_number = int(pr_parts[1])
-        except ValueError:
-            return jsonify({"error": "Invalid PR number: must be an integer"}), 400
+        pr_number, error = _validate_analyze_request(data)
+        if error:
+            return error
 
         # Capture db_path and session credentials before the generator starts
         # (both need the Flask request context)

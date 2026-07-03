@@ -190,9 +190,11 @@ def _sign_in(client):
         client.get(f'/api/google/oauth/callback?code=abc&state={state}')
 
 
+_PROW = 'https://prow.ci.openshift.org/view/gs/test-platform-results/pr-logs'
 ANALYZE_REQUEST = {
     "pr": "openshift/origin#1", "repo": "openshift/origin",
-    "job_name": "e2e-aws", "job_urls": ["u1", "u2", "u3"]
+    "job_name": "e2e-aws",
+    "job_urls": [f"{_PROW}/1", f"{_PROW}/2", f"{_PROW}/3"]
 }
 
 
