@@ -4,6 +4,10 @@ import os
 import re
 import tempfile
 
+# Overall deadline for a single permafail analysis (both streaming and
+# non-streaming paths)
+ANALYSIS_TIMEOUT_SECONDS = 300
+
 
 def build_claude_env(google_adc=None):
     """
@@ -147,6 +151,20 @@ Return ONLY the final JSON result with no additional explanation."""
         last_line_count = 0
 
         while process.poll() is None:
+            # Overall deadline (matches the non-streaming path's timeout).
+            # Without this the loop had no exit while the child hung, and
+            # the TimeoutExpired handler below was unreachable.
+            if __import__('time').time() - start_time > ANALYSIS_TIMEOUT_SECONDS:
+                yield json.dumps({
+                    "type": "result",
+                    "data": {
+                        "permafail": False,
+                        "error": f"Analysis timed out after {ANALYSIS_TIMEOUT_SECONDS // 60} minutes",
+                        "signatures": []
+                    }
+                })
+                return  # finally terminates the child and cleans up
+
             __import__('time').sleep(0.5)
 
             # Yield any new lines that were captured
@@ -173,7 +191,7 @@ Return ONLY the final JSON result with no additional explanation."""
                 yield json.dumps({"type": "output", "line": line.rstrip('\n')})
 
         # Wait for process to complete
-        return_code = process.wait(timeout=300)
+        return_code = process.wait(timeout=ANALYSIS_TIMEOUT_SECONDS)
 
         if return_code != 0:
             yield json.dumps({
@@ -330,7 +348,7 @@ Return ONLY the final JSON result with no additional explanation."""
             input=prompt,  # Pass prompt via stdin
             capture_output=True,
             text=True,
-            timeout=300,  # 5 minute timeout
+            timeout=ANALYSIS_TIMEOUT_SECONDS,
             cwd=get_claude_workdir(),
             env=env
         )

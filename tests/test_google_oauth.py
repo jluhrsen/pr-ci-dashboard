@@ -304,3 +304,34 @@ def test_streaming_generator_close_kills_child_and_cleans_adc():
 
     assert spawned['proc'].poll() is not None  # child terminated
     assert not os.path.exists(spawned['adc_path'])  # ADC file removed
+
+
+def test_streaming_overall_timeout_kills_child():
+    """A hung child hits the overall deadline: timeout result yielded, child
+    terminated, ADC cleaned (previously the loop had no deadline at all)."""
+    import subprocess as real_subprocess
+    from pr_ci_dashboard.utils import ai_analyzer
+
+    adc = {'type': 'authorized_user', 'refresh_token': 'rt'}
+    spawned = {}
+    orig_popen = real_subprocess.Popen
+
+    def fake_popen(cmd, **kwargs):
+        proc = orig_popen(['sleep', '60'],
+                          stdin=kwargs.get('stdin'), stdout=kwargs.get('stdout'),
+                          stderr=kwargs.get('stderr'), text=kwargs.get('text'),
+                          env=kwargs.get('env'))
+        spawned['proc'] = proc
+        spawned['adc_path'] = kwargs['env']['GOOGLE_APPLICATION_CREDENTIALS']
+        return proc
+
+    with patch.object(ai_analyzer.subprocess, 'Popen', side_effect=fake_popen), \
+         patch.object(ai_analyzer, 'ANALYSIS_TIMEOUT_SECONDS', 1):
+        events = list(ai_analyzer.analyze_permafail_streaming(
+            ['u1', 'u2'], 'job', 'org/repo#1', google_adc=adc))
+
+    final = json.loads(events[-1])
+    assert final['type'] == 'result'
+    assert 'timed out' in final['data']['error']
+    assert spawned['proc'].poll() is not None       # child terminated
+    assert not os.path.exists(spawned['adc_path'])  # ADC cleaned

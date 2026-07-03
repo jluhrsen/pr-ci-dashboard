@@ -128,9 +128,10 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
       details (expanded) when the backend returns an `error` field, instead
       of a healthy-looking "0 failed / 0 running". API pass-through pinned by
       tests/test_jobs_error_passthrough.py.
-- [ ] Streaming analyzer overall timeout (pre-existing bug: `while process.poll()`
-      loop in `ai_analyzer.analyze_permafail_streaming` has no deadline; the
-      TimeoutExpired handler is unreachable).
+- [x] Streaming analyzer overall timeout. DONE 2026-07-03: 300s deadline
+      (ANALYSIS_TIMEOUT_SECONDS, shared with the non-streaming path) checked
+      each loop iteration; on expiry a timeout result is yielded and the
+      finally block terminates the child and cleans the per-user ADC file.
 - [ ] SQLite → PostgreSQL when multi-replica or shared state is needed (Phase 3).
 - [x] Move auto-retest enablement server-side. DONE 2026-07-02: state lives in
       the `auto_retest` SQLite table via GET/POST `/api/auto-retest`; the
