@@ -23,6 +23,7 @@ def test_db_path_cli_arg_affects_init_db():
              patch('pr_ci_dashboard.server.init_db') as mock_init_db, \
              patch('pr_ci_dashboard.server.fetch_scripts'), \
              patch('pr_ci_dashboard.server.check_gh_auth', return_value={'authenticated': True}), \
+             patch('pr_ci_dashboard.server.run_gunicorn'), \
              patch('pr_ci_dashboard.server.app') as mock_app:
 
             # Simulate --db-path argument
@@ -35,12 +36,7 @@ def test_db_path_cli_arg_affects_init_db():
             mock_args.search_terms = []
             mock_parse.return_value = mock_args
 
-            # Call main() (will exit before app.run due to mocks)
-            try:
-                main()
-            except AttributeError:
-                # Mock app.run() doesn't exist, but we've verified the setup
-                pass
+            main()
 
             # Verify init_db was called with the custom path
             mock_init_db.assert_called_once()
@@ -54,13 +50,16 @@ def test_db_path_cli_arg_affects_init_db():
 
 def test_port_cli_arg_affects_app_run():
     """
-    Test that --port CLI argument affects the port Flask runs on.
+    Test that --port CLI argument affects the port the server runs on.
+
+    Non-debug mode dispatches to gunicorn (production server).
     """
     # Mock dependencies
     with patch('pr_ci_dashboard.server.parse_cli_args') as mock_parse, \
          patch('pr_ci_dashboard.server.init_db'), \
          patch('pr_ci_dashboard.server.fetch_scripts'), \
          patch('pr_ci_dashboard.server.check_gh_auth', return_value={'authenticated': True}), \
+         patch('pr_ci_dashboard.server.run_gunicorn') as mock_gunicorn, \
          patch('pr_ci_dashboard.server.app') as mock_app:
 
         # Simulate --port 9999
@@ -76,10 +75,10 @@ def test_port_cli_arg_affects_app_run():
         # Call main()
         main()
 
-        # Verify app.run() was called with custom port
-        mock_app.run.assert_called_once()
-        call_kwargs = mock_app.run.call_args[1]
-        assert call_kwargs['port'] == 9999
+        # Verify gunicorn was started with the custom port (no dev server)
+        mock_gunicorn.assert_called_once()
+        assert mock_gunicorn.call_args[0][1] == 9999
+        mock_app.run.assert_not_called()
 
 
 def test_search_override_affects_config():
@@ -136,7 +135,8 @@ def test_env_var_dashboard_port_used_when_no_cli_arg():
          patch('pr_ci_dashboard.server.init_db'), \
          patch('pr_ci_dashboard.server.fetch_scripts'), \
          patch('pr_ci_dashboard.server.check_gh_auth', return_value={'authenticated': True}), \
-         patch('pr_ci_dashboard.server.app') as mock_app, \
+         patch('pr_ci_dashboard.server.run_gunicorn') as mock_gunicorn, \
+         patch('pr_ci_dashboard.server.app'), \
          patch.dict(os.environ, {'DASHBOARD_PORT': '7777'}):
 
         # Simulate no --port argument
@@ -152,10 +152,9 @@ def test_env_var_dashboard_port_used_when_no_cli_arg():
         # Call main()
         main()
 
-        # Verify app.run() used env var port
-        mock_app.run.assert_called_once()
-        call_kwargs = mock_app.run.call_args[1]
-        assert call_kwargs['port'] == 7777
+        # Verify gunicorn used env var port
+        mock_gunicorn.assert_called_once()
+        assert mock_gunicorn.call_args[0][1] == 7777
 
 
 def test_repeated_main_calls_do_not_leak_state():
@@ -174,7 +173,8 @@ def test_repeated_main_calls_do_not_leak_state():
              patch('pr_ci_dashboard.server.init_db') as mock_init_db, \
              patch('pr_ci_dashboard.server.fetch_scripts'), \
              patch('pr_ci_dashboard.server.check_gh_auth', return_value={'authenticated': True}), \
-             patch('pr_ci_dashboard.server.app') as mock_app:
+             patch('pr_ci_dashboard.server.run_gunicorn') as mock_gunicorn, \
+             patch('pr_ci_dashboard.server.app'):
 
             # First call: custom --port 9999, --search-override "custom query", --db-path
             mock_args_custom = MagicMock()
@@ -191,12 +191,12 @@ def test_repeated_main_calls_do_not_leak_state():
             # Verify first call used custom values
             first_init_call = mock_init_db.call_args_list[0]
             assert first_init_call[0][0] == os.path.abspath(custom_db_path)
-            first_run_call = mock_app.run.call_args_list[0]
-            assert first_run_call[1]['port'] == 9999
+            first_run_call = mock_gunicorn.call_args_list[0]
+            assert first_run_call[0][1] == 9999
 
             # Reset mocks
             mock_init_db.reset_mock()
-            mock_app.reset_mock()
+            mock_gunicorn.reset_mock()
 
             # Second call: no args (should return to defaults/env, not inherit from first call)
             mock_args_default = MagicMock()
@@ -215,21 +215,23 @@ def test_repeated_main_calls_do_not_leak_state():
             from pr_ci_dashboard.utils.db import DB_PATH
             second_init_call = mock_init_db.call_args_list[0]
             assert second_init_call[0][0] == DB_PATH  # Default DB path, not custom
-            second_run_call = mock_app.run.call_args_list[0]
-            assert second_run_call[1]['port'] == 5000  # Default port, not 9999
+            second_run_call = mock_gunicorn.call_args_list[0]
+            assert second_run_call[0][1] == 5000  # Default port, not 9999
 
 
 def test_debug_off_by_default_in_app_run():
     """
-    Test that app.run() is called with debug=False when --debug is not given.
+    Without --debug, the production server (gunicorn) runs and the Werkzeug
+    dev server (app.run) is never touched.
 
-    Regression test: debug=True was previously hardcoded, exposing the
-    Werkzeug interactive debugger in production deployments.
+    Regression lineage: debug=True was once hardcoded in app.run, exposing
+    the Werkzeug interactive debugger in production deployments.
     """
     with patch('pr_ci_dashboard.server.parse_cli_args') as mock_parse, \
          patch('pr_ci_dashboard.server.init_db'), \
          patch('pr_ci_dashboard.server.fetch_scripts'), \
          patch('pr_ci_dashboard.server.check_gh_auth', return_value={'authenticated': True}), \
+         patch('pr_ci_dashboard.server.run_gunicorn') as mock_gunicorn, \
          patch('pr_ci_dashboard.server.app') as mock_app:
 
         mock_args = MagicMock()
@@ -243,13 +245,14 @@ def test_debug_off_by_default_in_app_run():
 
         main()
 
-        mock_app.run.assert_called_once()
-        assert mock_app.run.call_args[1]['debug'] is False
+        mock_gunicorn.assert_called_once()
+        mock_app.run.assert_not_called()
 
 
 def test_debug_flag_enables_debug_in_app_run():
     """
-    Test that --debug results in app.run(debug=True).
+    Test that --debug results in the Werkzeug dev server with debug=True
+    (development mode; gunicorn is not used).
     """
     with patch('pr_ci_dashboard.server.parse_cli_args') as mock_parse, \
          patch('pr_ci_dashboard.server.init_db'), \

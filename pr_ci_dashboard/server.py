@@ -488,6 +488,31 @@ def build_config(args, environ=None):
     return config
 
 
+def run_gunicorn(flask_app, port):
+    """Run the app under gunicorn (production server).
+
+    Single worker: the OAuth session stores live in process memory, so
+    multiple workers would split sessions between processes. Threads provide
+    the concurrency (parallel job fetches, multiple SSE analyze streams).
+    """
+    from gunicorn.app.base import BaseApplication
+
+    class DashboardApplication(BaseApplication):
+        def load_config(self):
+            self.cfg.set('bind', f'0.0.0.0:{port}')
+            self.cfg.set('workers', 1)
+            self.cfg.set('worker_class', 'gthread')
+            self.cfg.set('threads', 16)
+            # SSE analyze streams legitimately run up to 5 minutes
+            self.cfg.set('timeout', 600)
+            self.cfg.set('accesslog', '-')
+
+        def load(self):
+            return flask_app
+
+    DashboardApplication().run()
+
+
 def main():
     """Start the Flask server."""
     # Parse CLI arguments (exits early for --help)
@@ -529,10 +554,13 @@ def main():
 
     print(f"\n🌐 Dashboard running at http://localhost:{CONFIG['port']}")
     print(f"📝 Search query: {CONFIG['search_query']}")
-    if CONFIG['debug']:
-        print("⚠️  Debug mode enabled - do NOT use in production")
 
-    app.run(host='0.0.0.0', port=CONFIG['port'], debug=CONFIG['debug'])
+    if CONFIG['debug']:
+        # Werkzeug dev server with reloader/debugger - development only
+        print("⚠️  Debug mode enabled - do NOT use in production")
+        app.run(host='0.0.0.0', port=CONFIG['port'], debug=True)
+    else:
+        run_gunicorn(app, CONFIG['port'])
 
 
 if __name__ == '__main__':

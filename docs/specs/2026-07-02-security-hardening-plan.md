@@ -68,9 +68,11 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
 
 ## Must-fix before any shared/Route-exposed deployment
 
-- [ ] **Production WSGI server.** Replace Flask/Werkzeug dev server
-      (`app.run()`) with gunicorn. Reviewers auto-flag the dev server; it is
-      single-threaded-ish, unhardened, and its debug mode is one env var away.
+- [x] **Production WSGI server.** DONE 2026-07-03: non-debug mode runs
+      gunicorn (gthread, workers=1 because OAuth session state is
+      process-memory, threads=16, timeout 600s for SSE analyze streams);
+      `--debug` keeps the Werkzeug dev server for development. The
+      multi-worker/shared-store question is resolved by pinning workers=1.
 - [ ] **TLS.** Route with edge or reencrypt termination; no plaintext HTTP.
 - [x] **Session security.** DONE 2026-07-03 (partial): HttpOnly + SameSite=Lax
       set; Secure opt-in via DASHBOARD_SECURE_COOKIES=1 (Phase 1 port-forward

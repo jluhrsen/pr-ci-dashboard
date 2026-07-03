@@ -12,6 +12,7 @@ license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0.0",
+    "gunicorn>=21.0.0",
 ]
 
 [project.optional-dependencies]

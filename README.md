@@ -137,7 +137,7 @@ pr-ci-dashboard --db-path /custom/path/dashboard.db --port 5000
 - `--search QUERY` - Search terms appended to the default query
 - `--search-override QUERY` - Completely replace the default search query
 - `--db-path PATH` - Database file location (overrides `PR_CI_DASHBOARD_DB` env var)
-- `--debug` - Enable Flask debug mode (development only - never use in production; also `DASHBOARD_DEBUG` env var)
+- `--debug` - Run the Werkzeug dev server with debug mode (development only - never use in production; also `DASHBOARD_DEBUG` env var). Without it, the dashboard runs under gunicorn.
 - Positional arguments - legacy form, appended to the search query: `pr-ci-dashboard author:jluhrsen`
 
 **Backward compatibility:**
