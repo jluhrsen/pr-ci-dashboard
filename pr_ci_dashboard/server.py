@@ -133,6 +133,35 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/healthz')
+def healthz():
+    """Lightweight liveness/readiness probe: process up + database usable.
+
+    Deliberately outside /api/ so it is never login-gated, and cheap enough
+    for kubelet probe cadence (no template render, no subprocesses).
+    Opens the database read-write WITHOUT create (mode=rw URI) so a missing
+    file fails instead of being silently created empty, and verifies the
+    expected schema is present.
+    """
+    import sqlite3
+    try:
+        path = app.config.get('DB_PATH')
+        conn = sqlite3.connect(f'file:{path}?mode=rw', uri=True, timeout=2)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                "AND name IN ('job_analyses', 'auto_retest', 'audit_log')"
+            ).fetchone()
+            if row[0] != 3:
+                return jsonify({"status": "unhealthy",
+                                "error": "database schema incomplete"}), 503
+        finally:
+            conn.close()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"status": "unhealthy", "error": str(e)}), 503
+
+
 @app.route('/api/auth/status')
 def auth_status():
     """Check GitHub CLI authentication status."""

@@ -120,8 +120,9 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
       credential files; scrub after subprocess exit; never log tokens.
 - [ ] Dependency/CVE scanning in CI for the image; rebuild cadence for base image.
 - [ ] NetworkPolicy restricting ingress to the Route/oauth-proxy.
-- [ ] Resource limits tuned; liveness probe moved to a lightweight `/healthz`
-      (avoids rendering index.html; also add readiness variant).
+- [x] Probes on lightweight `/healthz`. DONE 2026-07-03: process + DB check,
+      never login-gated; k8s liveness/readiness switched to it. Resource
+      limits still default (tune under real load).
 - [x] Surface backend job-fetch errors in the UI. DONE 2026-07-03: job
       sections render a red "fetch failed" header and the error/stderr
       details (expanded) when the backend returns an `error` field, instead

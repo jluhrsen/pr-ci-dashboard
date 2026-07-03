@@ -120,20 +120,21 @@ spec:
             memory: "2Gi"
             cpu: "2000m"
 
-        # Liveness probe: check Flask app responds
+        # Liveness probe: lightweight /healthz (process + DB reachable);
+        # never login-gated, no template render
         livenessProbe:
           httpGet:
-            path: /
+            path: /healthz
             port: 5000
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
 
-        # Readiness probe: check Flask app ready
+        # Readiness probe: same /healthz
         readinessProbe:
           httpGet:
-            path: /
+            path: /healthz
             port: 5000
           initialDelaySeconds: 10
           periodSeconds: 5
