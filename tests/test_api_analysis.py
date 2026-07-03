@@ -12,6 +12,7 @@ def client(tmp_path):
     init_db(str(db_path))
 
     app.config['TESTING'] = True
+    app.config['CSRF_ENABLED'] = False
     app.config['DB_PATH'] = str(db_path)
 
     with app.test_client() as client:

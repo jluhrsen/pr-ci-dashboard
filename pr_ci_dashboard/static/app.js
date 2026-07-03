@@ -27,6 +27,32 @@ const autoRetestCooldown = new Map(); // "owner/repo/number/jobName" -> timestam
 // Context menu tracking
 let contextMenuTarget = null;
 
+// ========================================
+// CSRF protection
+// ========================================
+// All state-changing /api/ requests must carry the session's CSRF token.
+// Installed as a fetch interceptor so every current and future call site is
+// covered (including the SSE analyze-stream POST).
+let csrfToken = null;
+
+const _originalFetch = window.fetch.bind(window);
+window.fetch = (url, options = {}) => {
+    const method = (options.method || 'GET').toUpperCase();
+    if (csrfToken && method !== 'GET' && typeof url === 'string' && url.startsWith('/api/')) {
+        options = {...options, headers: {...(options.headers || {}), 'X-CSRF-Token': csrfToken}};
+    }
+    return _originalFetch(url, options);
+};
+
+async function initCsrf() {
+    try {
+        const response = await _originalFetch('/api/csrf-token');
+        csrfToken = (await response.json()).token;
+    } catch (error) {
+        console.error('Failed to fetch CSRF token:', error);
+    }
+}
+
 // DOM element cache
 const DOM = {
     searchInput: null,
@@ -58,6 +84,10 @@ async function init() {
     DOM.prContainer = document.getElementById('pr-cards-container');
     DOM.toastContainer = document.getElementById('toast-container');
     DOM.monitoredPrsList = document.getElementById('monitored-prs-list');
+
+    // CSRF token must exist before any state-changing request (including the
+    // auto-retest localStorage migration below)
+    await initCsrf();
 
     // Load auto-retest state from the server before the first search renders
     // PR cards, so toggles reflect saved state instead of racing the fetch

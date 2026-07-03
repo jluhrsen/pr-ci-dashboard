@@ -16,6 +16,7 @@ def db_path(tmp_path):
 def client(db_path):
     """Create test client with temporary database"""
     app.config['TESTING'] = True
+    app.config['CSRF_ENABLED'] = False
     app.config['DB_PATH'] = db_path
 
     with app.test_client() as client:

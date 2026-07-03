@@ -10,6 +10,7 @@ def client(tmp_path):
     db_path = tmp_path / "test.db"
     init_db(str(db_path))
     app.config['TESTING'] = True
+    app.config['CSRF_ENABLED'] = False
     app.config['DB_PATH'] = str(db_path)
     with app.test_client() as client:
         yield client

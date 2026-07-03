@@ -29,8 +29,53 @@ app = Flask(__name__)
 # is the intended memory-only token model.
 app.secret_key = os.environ.get('DASHBOARD_SECRET_KEY') or py_secrets.token_hex(32)
 
+# Session cookie hardening. Secure is opt-in because Phase 1 access is plain
+# http via kubectl port-forward; set DASHBOARD_SECURE_COOKIES=1 behind TLS.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get(
+        'DASHBOARD_SECURE_COOKIES', '').strip().lower() in ('1', 'true', 'yes', 'on'),
+)
+
 # Configure database path
 app.config['DB_PATH'] = DB_PATH
+
+# CSRF protection for state-changing API calls (session-bound token, sent by
+# the frontend in X-CSRF-Token). Disabled only by tests that aren't
+# exercising CSRF itself.
+app.config.setdefault('CSRF_ENABLED', True)
+
+
+@app.route('/api/csrf-token')
+def api_csrf_token():
+    """Issue (or re-issue) the session's CSRF token for the frontend."""
+    token = session.get('csrf_token')
+    if not token:
+        token = py_secrets.token_urlsafe(32)
+        session['csrf_token'] = token
+    return jsonify({"token": token})
+
+
+@app.before_request
+def csrf_protect():
+    """Reject state-changing API requests without a valid session CSRF token.
+
+    SameSite=Lax already blocks cross-site POSTs in modern browsers; this is
+    defense in depth. Applies to blueprint routes too.
+    """
+    if not app.config.get('CSRF_ENABLED', True):
+        return None
+    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        return None
+    if not request.path.startswith('/api/'):
+        return None
+
+    token = session.get('csrf_token')
+    header = request.headers.get('X-CSRF-Token')
+    if not token or not header or not py_secrets.compare_digest(header, token):
+        return jsonify({"error": "CSRF token missing or invalid"}), 403
+    return None
 
 # Register blueprints
 app.register_blueprint(analysis_bp)

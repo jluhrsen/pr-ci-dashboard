@@ -72,11 +72,16 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
       (`app.run()`) with gunicorn. Reviewers auto-flag the dev server; it is
       single-threaded-ish, unhardened, and its debug mode is one env var away.
 - [ ] **TLS.** Route with edge or reencrypt termination; no plaintext HTTP.
-- [ ] **Session security.** HttpOnly/Secure/SameSite cookies, server-side session
-      expiry, logout.
-- [ ] **CSRF protection** on all state-changing endpoints: `/api/retest`,
-      `/api/jobs/analyze`, `/api/jobs/analyze-stream`, `/api/jobs/override`,
-      `/api/jobs/delete-cache`.
+- [x] **Session security.** DONE 2026-07-03 (partial): HttpOnly + SameSite=Lax
+      set; Secure opt-in via DASHBOARD_SECURE_COOKIES=1 (Phase 1 port-forward
+      is plain http). Server-side idle expiry already existed (session TTL);
+      OAuth disconnects serve as logout. Remaining: flip Secure default on
+      once TLS lands.
+- [x] **CSRF protection.** DONE 2026-07-03: session-bound token from
+      /api/csrf-token, enforced by a before_request hook on ALL non-GET /api/
+      routes (blueprints included); frontend fetch interceptor attaches
+      X-CSRF-Token everywhere. tests/test_csrf.py covers missing/wrong/valid
+      token, cross-session token reuse, GETs unaffected, blueprint coverage.
 - [ ] **OAuth flows via `authlib` with PKCE + state validation.** Never hand-roll.
 - [ ] **Input validation audit.** Backend shells out to bash scripts and builds
       Claude prompts from request JSON. Validate:
