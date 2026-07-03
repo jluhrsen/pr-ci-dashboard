@@ -109,8 +109,13 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
 
 ## Hardening (expected in review, not launch-blocking)
 
-- [ ] Audit log: who triggered retest/analyze/override/delete-cache, when, result.
-- [ ] Rate limiting on retest and analyze endpoints (abuse/cost control).
+- [x] Audit log. DONE 2026-07-03: audit_log SQLite table; retest, analyze,
+      analyze-stream, override, delete-cache record actor (google email >
+      github login > anonymous), target, result; GET /api/audit reads back.
+      Audit failures never break the audited operation.
+- [x] Rate limiting. DONE 2026-07-03: per-session sliding window
+      (utils/rate_limit.py, thread-safe): retest 10/min, analyze 4/min
+      (Claude subprocess cost); 429 on breach. tests/test_audit_rate_limit.py.
 - [ ] Token handling: RAM-backed emptyDir (`medium: Memory`) for transient
       credential files; scrub after subprocess exit; never log tokens.
 - [ ] Dependency/CVE scanning in CI for the image; rebuild cadence for base image.

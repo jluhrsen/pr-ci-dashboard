@@ -66,3 +66,15 @@ def get_session_github():
 def get_session_google():
     """Return {"adc", "email"} for the current session, or None."""
     return _get_current(GOOGLE_SESSIONS)
+
+
+def current_actor():
+    """Best identity for audit purposes: Google email, else GitHub login,
+    else "anonymous"."""
+    google = get_session_google()
+    if google:
+        return google['email']
+    github = get_session_github()
+    if github:
+        return github['login']
+    return 'anonymous'

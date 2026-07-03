@@ -1,10 +1,18 @@
 # api/analysis.py
 import json
 from flask import Blueprint, request, jsonify, current_app, Response
-from ..utils.db import store_analysis, get_permafail_status, get_pr_permafail_status, set_override, delete_cached_analyses, normalize_permafail_result
+from ..utils.db import store_analysis, get_permafail_status, get_pr_permafail_status, set_override, delete_cached_analyses, normalize_permafail_result, record_audit
 from ..utils.ai_analyzer import analyze_permafail, analyze_permafail_streaming
-from ..utils.session_store import get_session_google
+from ..utils.session_store import get_session_google, current_actor, session_id
 from ..utils import validation
+from ..utils import rate_limit
+
+# Analyses spawn Claude subprocesses - the expensive operation to abuse
+ANALYZE_RATE = (4, 60)
+
+
+def _analyze_rate_limited():
+    return not rate_limit.allow(f'analyze:{session_id()}', *ANALYZE_RATE)
 
 
 def _session_google_adc():
@@ -85,6 +93,9 @@ def analyze_job():
         if error:
             return error
 
+        if _analyze_rate_limited():
+            return jsonify({"error": "Rate limit exceeded; try again shortly"}), 429
+
         # Run AI analysis (as the signed-in Google user when available)
         result = analyze_permafail(
             data["job_urls"],
@@ -92,6 +103,11 @@ def analyze_job():
             data["pr"],
             google_adc=_session_google_adc()
         )
+        record_audit(current_actor(), 'analyze',
+                     f"{data['pr']} {data['job_name']}",
+                     f"error: {result['error']}" if 'error' in result
+                     else f"permafail={normalize_permafail_result(result).get('permafail')}",
+                     db_path=current_app.config.get('DB_PATH'))
         result = normalize_permafail_result(result)
 
         # Check if AI analyzer returned an error
@@ -154,10 +170,14 @@ def analyze_job_stream():
         if error:
             return error
 
+        if _analyze_rate_limited():
+            return jsonify({"error": "Rate limit exceeded; try again shortly"}), 429
+
         # Capture db_path and session credentials before the generator starts
         # (both need the Flask request context)
         db_path = current_app.config.get('DB_PATH')
         google_adc = _session_google_adc()
+        actor = current_actor()
 
         def generate():
             """Generator function for SSE stream"""
@@ -194,6 +214,14 @@ def analyze_job_stream():
                         db_path=db_path
                     )
 
+            # Audit with the actor resolved back in request context
+            if final_result is not None:
+                record_audit(actor, 'analyze-stream',
+                             f"{data['pr']} {data['job_name']}",
+                             f"error: {final_result['error']}" if 'error' in final_result
+                             else f"permafail={final_result.get('permafail')}",
+                             db_path=db_path)
+
         return Response(generate(), mimetype='text/event-stream')
 
     except Exception as e:
@@ -219,6 +247,8 @@ def override_permafail():
     try:
         db_path = current_app.config.get('DB_PATH')
         set_override(data['job_url'], db_path=db_path)
+        record_audit(current_actor(), 'override', data['job_url'], 'success',
+                     db_path=db_path)
 
         return jsonify({"success": True})
 
@@ -248,6 +278,9 @@ def delete_cache():
     try:
         db_path = current_app.config.get('DB_PATH')
         deleted_count = delete_cached_analyses(data['job_urls'], db_path=db_path)
+        record_audit(current_actor(), 'delete-cache',
+                     f"{len(data['job_urls'])} URL(s)", f"deleted={deleted_count}",
+                     db_path=db_path)
 
         return jsonify({
             "success": True,

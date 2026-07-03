@@ -14,10 +14,16 @@ from .utils.session_store import (
     SESSION_TTL as GITHUB_SESSION_TTL,
     session_id as _session_id,
     prune as _prune_github_state,
-    get_session_github, get_session_google,
+    get_session_github, get_session_google, current_actor,
 )
-from .utils.db import init_db, get_auto_retest_state, set_auto_retest_state, DB_PATH
+from .utils.db import (init_db, get_auto_retest_state, set_auto_retest_state,
+                       record_audit, get_audit_log, DB_PATH)
 from .utils import validation
+from .utils import rate_limit
+
+# Rate limit per session: (max events, window seconds). Retests post GitHub
+# comments. The analyze limit lives in api/analysis.py with its endpoints.
+RETEST_RATE = (10, 60)
 from .api.search import search_prs
 from .api.jobs import get_pr_jobs
 from .api.retest import retest_jobs
@@ -191,13 +197,32 @@ def api_retest():
     if not isinstance(jobs, list) or not all(validation.valid_job_name(j) for j in jobs):
         return jsonify({"error": "Invalid job name(s)"}), 400
 
+    if not rate_limit.allow(f'retest:{_session_id()}', *RETEST_RATE):
+        return jsonify({"error": "Rate limit exceeded; try again shortly"}), 429
+
     # Post as the connected GitHub user when available; otherwise fall back
     # to the pod-level GH_TOKEN (Phase 1 behavior)
     github = get_session_github()
     token = github['token'] if github else None
 
     result = retest_jobs(owner, repo, pr, jobs, job_type, token=token)
+    record_audit(current_actor(), 'retest', f"{owner}/{repo}#{pr} {jobs}",
+                 'success' if result.get('success') else f"error: {result.get('error')}",
+                 db_path=app.config.get('DB_PATH'))
     return jsonify(result)
+
+
+@app.route('/api/audit')
+def api_audit():
+    """Most recent audit entries, newest first. ?limit=N (default 100)."""
+    try:
+        limit = int(request.args.get('limit', 100))
+    except ValueError:
+        return jsonify({"error": "Invalid limit"}), 400
+    try:
+        return jsonify(get_audit_log(limit=limit, db_path=app.config.get('DB_PATH')))
+    except Exception as e:
+        return jsonify({"error": f"Internal server error: {str(e)}"}), 500
 
 
 @app.route('/api/github/oauth/status')

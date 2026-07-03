@@ -130,6 +130,17 @@ def init_db(db_path=None):
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TIMESTAMP,
+                actor TEXT,
+                action TEXT,
+                target TEXT,
+                result TEXT
+            )
+        """)
+
         conn.commit()
     except sqlite3.Error as e:
         raise RuntimeError(f"Failed to initialize database at {path}: {e}")
@@ -451,6 +462,66 @@ def set_auto_retest_state(pr_key, enabled, db_path=None):
         conn.commit()
     except sqlite3.Error as e:
         raise RuntimeError(f"Failed to set auto-retest state for {pr_key}: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def record_audit(actor, action, target, result, db_path=None):
+    """
+    Append an audit log entry. Never raises: audit failures are printed but
+    must not break the audited operation.
+
+    Args:
+        actor: Identity string (google email, github login, or "anonymous")
+        action: What happened (e.g. "retest", "analyze", "override")
+        target: What it happened to (e.g. "openshift/origin#123 [e2e-aws]")
+        result: Outcome (e.g. "success", "error: ...")
+        db_path: Optional database path (defaults to DB_PATH)
+    """
+    path = db_path or DB_PATH
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        conn.execute("""
+            INSERT INTO audit_log (timestamp, actor, action, target, result)
+            VALUES (?, ?, ?, ?, ?)
+        """, (datetime.now(UTC).isoformat(), str(actor)[:200], str(action)[:50],
+              str(target)[:500], str(result)[:500]))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"[ERROR] Failed to record audit entry ({action} by {actor}): {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_audit_log(limit=100, db_path=None):
+    """
+    Fetch the most recent audit entries, newest first.
+
+    Returns:
+        list of dicts: {id, timestamp, actor, action, target, result}
+
+    Raises:
+        RuntimeError: If database operation fails
+    """
+    path = db_path or DB_PATH
+    conn = None
+    try:
+        conn = sqlite3.connect(path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, timestamp, actor, action, target, result
+            FROM audit_log ORDER BY id DESC LIMIT ?
+        """, (max(1, min(int(limit), 1000)),))
+        return [
+            {"id": r[0], "timestamp": r[1], "actor": r[2],
+             "action": r[3], "target": r[4], "result": r[5]}
+            for r in cursor.fetchall()
+        ]
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Failed to read audit log: {e}")
     finally:
         if conn:
             conn.close()
