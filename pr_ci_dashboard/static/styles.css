@@ -584,3 +584,19 @@ a.btn {
     color: white;
     text-align: center;
 }
+
+/* Backend job-fetch failure state */
+.job-section-header.job-section-error {
+    color: var(--primary);
+}
+
+.job-fetch-error {
+    padding: 0.5rem;
+    color: var(--primary);
+    background: #fdecea;
+    border: 1px solid var(--primary);
+    border-radius: 3px;
+    font-size: 0.65rem;
+    word-break: break-word;
+    white-space: pre-wrap;
+}

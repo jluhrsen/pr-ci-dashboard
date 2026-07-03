@@ -100,12 +100,11 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
 - [ ] NetworkPolicy restricting ingress to the Route/oauth-proxy.
 - [ ] Resource limits tuned; liveness probe moved to a lightweight `/healthz`
       (avoids rendering index.html; also add readiness variant).
-- [ ] Surface backend job-fetch errors in the UI. `utils/job_executor.py`
-      returns `{"error": ..., "failed": [], "running": []}` on script failure,
-      and the frontend renders the empty lists as a healthy "0 failed / 0
-      running" without showing the error (bit us in deployment: missing jq in
-      the image looked like all-green PRs). The UI should show a visible error
-      state when the `error` field is present.
+- [x] Surface backend job-fetch errors in the UI. DONE 2026-07-03: job
+      sections render a red "fetch failed" header and the error/stderr
+      details (expanded) when the backend returns an `error` field, instead
+      of a healthy-looking "0 failed / 0 running". API pass-through pinned by
+      tests/test_jobs_error_passthrough.py.
 - [ ] Streaming analyzer overall timeout (pre-existing bug: `while process.poll()`
       loop in `ai_analyzer.analyze_permafail_streaming` has no deadline; the
       TimeoutExpired handler is unreachable).

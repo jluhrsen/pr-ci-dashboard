@@ -1536,6 +1536,24 @@ async function renderJobSection(cardElement, sectionId, jobData, owner, repo, nu
     const header = section.querySelector('.job-section-header');
     const list = section.querySelector('.job-list');
 
+    // Backend script failures must be visible, not rendered as a healthy
+    // "0 failed | 0 running" (a missing tool in the container once looked
+    // like all-green PRs this way)
+    if (jobData.error) {
+        header.textContent = `▶ ${displayType} Jobs (⚠️ fetch failed)`;
+        header.classList.add('job-section-error');
+        const newHeader = header.cloneNode(true);
+        header.parentNode.replaceChild(newHeader, header);
+        newHeader.addEventListener('click', () => list.classList.toggle('expanded'));
+
+        list.innerHTML = '';
+        const details = jobData.stderr ? `${jobData.error}: ${jobData.stderr}` : String(jobData.error);
+        list.appendChild(createElement('div', 'job-fetch-error',
+            `⚠️ Failed to fetch ${displayType} jobs: ${details}`));
+        list.classList.add('expanded');
+        return;
+    }
+
     // Filter jobs (remove ones that are now running after retest)
     let failed = (jobData.failed || []).filter(job => {
         const jobKey = `${owner}/${repo}/${number}/${job.name}`;
@@ -1558,7 +1576,9 @@ async function renderJobSection(cardElement, sectionId, jobData, owner, repo, nu
 
     const running = jobData.running || [];
 
-    // Update header
+    // Update header (clear any error styling left by a previous failed fetch
+    // that has since recovered; the class survives the clone below otherwise)
+    header.classList.remove('job-section-error');
     header.textContent = `▶ ${displayType} Jobs (${failed.length} failed | ${running.length} running)`;
 
     // Add toggle listener
