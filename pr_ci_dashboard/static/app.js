@@ -2079,7 +2079,8 @@ async function retestJob(owner, repo, pr, jobs, type, skipTracking = false) {
         const response = await fetch('/api/retest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ owner, repo, pr, jobs, type })
+            // pr arrives as a string from prKey.split('/') at most call sites
+            body: JSON.stringify({ owner, repo, pr: Number(pr), jobs, type })
         });
 
         const result = await response.json();

@@ -246,6 +246,11 @@ def api_retest():
     if not all([owner, repo, pr, jobs]):
         return jsonify({"error": "Missing required fields"}), 400
 
+    # The frontend builds pr from URL/dataset strings; accept digit-strings.
+    # isascii() guards isdigit()'s unicode digits (e.g. '³') that int() rejects
+    if isinstance(pr, str) and pr.isascii() and pr.isdigit():
+        pr = int(pr)
+
     # These values become gh CLI arguments and PR comment content
     if not validation.valid_name(owner) or not validation.valid_name(repo):
         return jsonify({"error": "Invalid owner/repo"}), 400

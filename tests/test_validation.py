@@ -147,3 +147,20 @@ def test_search_rejects_oversized_query_and_bad_pagination(client):
     assert client.post('/api/search', json={"query": "is:pr", "page": 0}).status_code == 400
     assert client.post('/api/search', json={"query": "is:pr", "per_page": 1000}).status_code == 400
     assert client.post('/api/search', json={"query": "is:pr", "page": "1"}).status_code == 400
+
+
+def test_retest_accepts_string_pr_number(client):
+    """Regression: the frontend sends pr as a string (from prKey.split);
+    digit-strings must be accepted, non-numeric strings still rejected."""
+    with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}) as mock_retest:
+        response = client.post('/api/retest', json={
+            "owner": "openshift", "repo": "ovn-kubernetes", "pr": "3279",
+            "jobs": ["e2e-aws-ovn"], "type": "e2e"})
+    assert response.status_code == 200
+    assert mock_retest.call_args[0][2] == 3279  # coerced to int
+
+    for bad_pr in ("3279; rm", "\u00b3", "-1", "1.5", ""):
+        response = client.post('/api/retest', json={
+            "owner": "openshift", "repo": "ovn-kubernetes", "pr": bad_pr,
+            "jobs": ["e2e-aws-ovn"], "type": "e2e"})
+        assert response.status_code == 400, f"should reject pr={bad_pr!r}"
