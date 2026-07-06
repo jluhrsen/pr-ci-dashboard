@@ -11,8 +11,18 @@
     <div id="login-gate" class="login-gate hidden">
         <div class="login-gate-box">
             <h2>👻🚫 Flake Buster</h2>
-            <p>Sign in with your Red Hat Google account to use the dashboard.</p>
-            <a class="btn" href="/api/google/oauth/login">Sign in with Google</a>
+            <div id="login-gate-google" class="hidden">
+                <p>Sign in with your Red Hat Google account to use the dashboard.</p>
+                <a class="btn" href="/api/google/oauth/login">Sign in with Google</a>
+            </div>
+            <div id="login-gate-github" class="hidden">
+                <p>Connect your GitHub account to search PRs and trigger retests as you.</p>
+                <button class="btn" id="gate-github-btn">Connect GitHub</button>
+                <div id="gate-github-code" class="github-device-code hidden">
+                    Enter code <strong id="gate-github-user-code"></strong> at
+                    <a id="gate-github-link" href="#" target="_blank" rel="noopener">github.com/login/device</a>
+                </div>
+            </div>
         </div>
     </div>
 

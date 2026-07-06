@@ -99,6 +99,12 @@ spec:
         # - name: DASHBOARD_REQUIRE_LOGIN
         #   value: "1"
 
+        # Mandatory GitHub login: with GITHUB_OAUTH_CLIENT_ID set, search/job
+        # status/retest require a connected GitHub session and use that
+        # user's token (GH_TOKEN fallback never used, secret can be dropped)
+        # - name: DASHBOARD_REQUIRE_GITHUB
+        #   value: "1"
+
         volumeMounts:
         - name: data
           mountPath: /data

@@ -42,8 +42,10 @@ Per-user OAuth end-to-end, no shared long-lived secrets:
    unconnected sessions fall back to the shared pod token. Tokens are held in
    an in-memory dict keyed by a signed session cookie. See
    `utils/github_oauth.py` and the /api/github/oauth/* endpoints.
-   Remaining: reads (search/job status) still use the pod token; drop the
-   fallback token entirely once login is mandatory.
+   Reads DONE 2026-07-06: connected sessions' tokens now thread into
+   search/job-status too, and DASHBOARD_REQUIRE_GITHUB=1 makes the GitHub
+   connection mandatory for all gh-backed endpoints — the GH_TOKEN fallback
+   is then never used and the secret can be dropped.
 4. **Sessions:** memory-only. No refresh tokens persisted to SQLite/disk. Pod
    restart = users re-login. Documented residual risk: an admin with pod exec can
    access tokens of ACTIVE sessions only.

@@ -1,12 +1,23 @@
 """Execute bash scripts and parse output."""
+import os
 import subprocess
 import json
 from .script_fetcher import get_script_path
 
 
-def get_e2e_jobs(repo: str, pr_number: int) -> dict:
+def _gh_env(token):
+    """Subprocess env with an optional per-user GitHub token override."""
+    if token:
+        return {**os.environ, "GH_TOKEN": token}
+    return None
+
+
+def get_e2e_jobs(repo: str, pr_number: int, token: str = None) -> dict:
     """
     Execute e2e-retest.sh with --json flag and parse output.
+
+    Args:
+        token: Optional per-user GitHub token for the script's gh calls
 
     Returns:
         {"failed": [...], "running": [...]} or {"error": "message"}
@@ -19,7 +30,8 @@ def get_e2e_jobs(repo: str, pr_number: int) -> dict:
             ["bash", script_path, "--json", repo, str(pr_number)],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=_gh_env(token)
         )
 
         if result.returncode != 0:
@@ -54,9 +66,12 @@ def get_e2e_jobs(repo: str, pr_number: int) -> dict:
         }
 
 
-def get_payload_jobs(repo: str, pr_number: int) -> dict:
+def get_payload_jobs(repo: str, pr_number: int, token: str = None) -> dict:
     """
     Execute payload-retest.sh with --json flag and parse output.
+
+    Args:
+        token: Optional per-user GitHub token for the script's gh calls
 
     Returns:
         {"failed": [...], "running": [...]} or {"error": "message"}
@@ -69,7 +84,8 @@ def get_payload_jobs(repo: str, pr_number: int) -> dict:
             ["bash", script_path, "--json", repo, str(pr_number)],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=_gh_env(token)
         )
 
         if result.returncode != 0:

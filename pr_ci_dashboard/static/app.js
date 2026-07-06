@@ -43,15 +43,89 @@ window.fetch = async (url, options = {}) => {
     }
     const response = await _originalFetch(url, options);
     // Mandatory-login mode: any API 401 (including mid-session expiry)
-    // drops the user at the sign-in gate
+    // drops the user at the sign-in gate for the provider that rejected
     if (response.status === 401 && typeof url === 'string' && url.startsWith('/api/')) {
-        showLoginGate();
+        try {
+            const body = await response.clone().json();
+            if (body.error === 'github_login_required') {
+                document.getElementById('gate-github-btn').addEventListener('click', gateGithubConnect, {once: true});
+                showLoginGate('github');
+            } else {
+                showLoginGate('google');
+            }
+        } catch (e) {
+            showLoginGate('google');
+        }
     }
     return response;
 };
 
-function showLoginGate() {
+function showLoginGate(mode = 'google') {
     document.getElementById('login-gate').classList.remove('hidden');
+    if (mode === 'github') {
+        document.getElementById('login-gate-github').classList.remove('hidden');
+    } else {
+        document.getElementById('login-gate-google').classList.remove('hidden');
+    }
+}
+
+// GitHub device flow from the login gate: same endpoints as the sidebar
+// connect, but renders the code inside the gate and reloads on success so
+// init() re-runs with the connected session
+async function gateGithubConnect() {
+    const btn = document.getElementById('gate-github-btn');
+    if (btn.disabled) return;
+    btn.disabled = true;
+    stopGithubPolling();
+
+    try {
+        const response = await fetch('/api/github/oauth/start', {method: 'POST'});
+        const flow = await response.json();
+        if (!response.ok || flow.error) {
+            throw new Error(flow.error || `HTTP ${response.status}`);
+        }
+
+        document.getElementById('gate-github-user-code').textContent = flow.user_code;
+        document.getElementById('gate-github-link').href = flow.verification_uri;
+        document.getElementById('gate-github-code').classList.remove('hidden');
+
+        let intervalMs = (flow.interval || 5) * 1000;
+        const expiresAt = Date.now() + (flow.expires_in || 900) * 1000;
+
+        const poll = async () => {
+            githubPollTimer = null;
+            if (Date.now() > expiresAt) {
+                fetch('/api/github/oauth/disconnect', {method: 'POST'}).catch(() => {});
+                btn.disabled = false;
+                document.getElementById('gate-github-code').classList.add('hidden');
+                showToast('GitHub connect timed out; try again', 'error');
+                return;
+            }
+            try {
+                const result = await fetch('/api/github/oauth/poll', {method: 'POST'}).then(r => r.json());
+                if (result.status === 'success') {
+                    window.location.reload();
+                    return;
+                }
+                if (result.status === 'error' || result.error) {
+                    btn.disabled = false;
+                    document.getElementById('gate-github-code').classList.add('hidden');
+                    showToast(`GitHub connect failed: ${result.error}`, 'error');
+                    return;
+                }
+                if (result.status === 'slow_down') {
+                    intervalMs = (result.interval || 10) * 1000;
+                }
+            } catch (error) {
+                console.error('GitHub poll failed:', error);
+            }
+            githubPollTimer = setTimeout(poll, intervalMs);
+        };
+        githubPollTimer = setTimeout(poll, intervalMs);
+    } catch (error) {
+        btn.disabled = false;
+        showToast(`Failed to start GitHub connect: ${error.message}`, 'error');
+    }
 }
 
 async function initCsrf() {
@@ -104,11 +178,24 @@ async function init() {
     try {
         const googleStatus = await fetch('/api/google/oauth/status').then(r => r.json());
         if (googleStatus.login_required && !googleStatus.connected) {
-            showLoginGate();
+            showLoginGate('google');
             return;
         }
     } catch (error) {
         console.error('Failed to check login requirement:', error);
+    }
+
+    // GitHub-required mode: search/job-status/retest run with the user's own
+    // token, so a connected GitHub session is needed before loading anything
+    try {
+        const githubStatus = await fetch('/api/github/oauth/status').then(r => r.json());
+        if (githubStatus.login_required && !githubStatus.connected) {
+            document.getElementById('gate-github-btn').addEventListener('click', gateGithubConnect);
+            showLoginGate('github');
+            return;
+        }
+    } catch (error) {
+        console.error('Failed to check GitHub login requirement:', error);
     }
 
     // Load auto-retest state from the server before the first search renders

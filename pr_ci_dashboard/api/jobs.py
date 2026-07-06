@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ..utils.job_executor import get_e2e_jobs, get_payload_jobs
 
 
-def get_pr_jobs(owner: str, repo: str, pr_number: int) -> dict:
+def get_pr_jobs(owner: str, repo: str, pr_number: int, token: str = None) -> dict:
     """
     Fetch e2e and payload job status for a PR.
 
@@ -20,8 +20,8 @@ def get_pr_jobs(owner: str, repo: str, pr_number: int) -> dict:
 
     # Run both in parallel
     with ThreadPoolExecutor(max_workers=2) as executor:
-        e2e_future = executor.submit(get_e2e_jobs, repo_full, pr_number)
-        payload_future = executor.submit(get_payload_jobs, repo_full, pr_number)
+        e2e_future = executor.submit(get_e2e_jobs, repo_full, pr_number, token)
+        payload_future = executor.submit(get_payload_jobs, repo_full, pr_number, token)
 
         e2e_result = e2e_future.result()
         payload_result = payload_future.result()

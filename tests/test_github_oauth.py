@@ -67,7 +67,7 @@ def test_status_disabled(client, monkeypatch):
     """Feature reports disabled when GITHUB_OAUTH_CLIENT_ID is unset."""
     monkeypatch.delenv('GITHUB_OAUTH_CLIENT_ID', raising=False)
     status = client.get('/api/github/oauth/status').get_json()
-    assert status == {"enabled": False, "connected": False, "login": None}
+    assert status == {"enabled": False, "connected": False, "login": None, "login_required": False}
 
 
 def test_start_requires_client_id(client, monkeypatch):
@@ -104,7 +104,7 @@ def test_full_device_flow(client, monkeypatch):
     assert result == {'status': 'success', 'login': 'jluhrsen'}
 
     status = client.get('/api/github/oauth/status').get_json()
-    assert status == {"enabled": True, "connected": True, "login": "jluhrsen"}
+    assert status == {"enabled": True, "connected": True, "login": "jluhrsen", "login_required": False}
 
     # Disconnect drops the session
     client.post('/api/github/oauth/disconnect')

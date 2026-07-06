@@ -71,6 +71,22 @@ def _login_required_enabled():
     return flag and google_oauth.get_client_config() is not None
 
 
+def _github_required_enabled():
+    """GitHub-login gate for gh-backed endpoints (search, job status,
+    retest): DASHBOARD_REQUIRE_GITHUB truthy AND GitHub OAuth configured.
+    With this on, those endpoints run with the user's own token and the
+    pod-level GH_TOKEN fallback is never used."""
+    flag = os.environ.get('DASHBOARD_REQUIRE_GITHUB', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    return flag and github_oauth.get_client_id() is not None
+
+
+def _github_gate():
+    """401 response when GitHub login is required but absent, else None."""
+    if _github_required_enabled() and get_session_github() is None:
+        return jsonify({"error": "github_login_required"}), 401
+    return None
+
+
 # Paths that must work before login: the login flow itself, the CSRF token
 # (session-bound, needed for the first POST after login), and health probes
 LOGIN_EXEMPT_PREFIXES = ('/api/google/oauth/', '/healthz')
@@ -188,7 +204,13 @@ def api_search():
             or page < 1 or not (1 <= per_page <= 100):
         return jsonify({"error": "Invalid pagination"}), 400
 
-    result = search_prs(query, page, per_page)
+    gate = _github_gate()
+    if gate:
+        return gate
+    github = get_session_github()
+
+    result = search_prs(query, page, per_page,
+                        token=github['token'] if github else None)
     return jsonify(result)
 
 
@@ -200,7 +222,13 @@ def api_pr_jobs(owner, repo, pr_number):
             or not validation.valid_pr_number(pr_number):
         return jsonify({"error": "Invalid owner/repo/PR"}), 400
 
-    result = get_pr_jobs(owner, repo, pr_number)
+    gate = _github_gate()
+    if gate:
+        return gate
+    github = get_session_github()
+
+    result = get_pr_jobs(owner, repo, pr_number,
+                         token=github['token'] if github else None)
     return jsonify(result)
 
 
@@ -229,8 +257,13 @@ def api_retest():
     if not rate_limit.allow(f'retest:{_session_id()}', *RETEST_RATE):
         return jsonify({"error": "Rate limit exceeded; try again shortly"}), 429
 
-    # Post as the connected GitHub user when available; otherwise fall back
-    # to the pod-level GH_TOKEN (Phase 1 behavior)
+    gate = _github_gate()
+    if gate:
+        return gate
+
+    # Post as the connected GitHub user when available; without the
+    # DASHBOARD_REQUIRE_GITHUB gate, fall back to the pod-level GH_TOKEN
+    # (Phase 1 behavior)
     github = get_session_github()
     token = github['token'] if github else None
 
@@ -262,7 +295,8 @@ def api_github_oauth_status():
     return jsonify({
         "enabled": client_id is not None,
         "connected": github is not None,
-        "login": github['login'] if github else None
+        "login": github['login'] if github else None,
+        "login_required": _github_required_enabled()
     })
 
 

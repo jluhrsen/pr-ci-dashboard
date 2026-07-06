@@ -1,10 +1,11 @@
 """PR search via GitHub CLI."""
+import os
 import subprocess
 import json
 import shlex
 
 
-def search_prs(query: str, page: int = 1, per_page: int = 10) -> dict:
+def search_prs(query: str, page: int = 1, per_page: int = 10, token: str = None) -> dict:
     """
     Search PRs using GitHub CLI.
 
@@ -40,11 +41,13 @@ def search_prs(query: str, page: int = 1, per_page: int = 10) -> dict:
                "--json", "number,title,repository,author,createdAt,state",
                "--"] + query_args
 
+        env = {**os.environ, "GH_TOKEN": token} if token else None
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            env=env
         )
 
         if result.returncode != 0:

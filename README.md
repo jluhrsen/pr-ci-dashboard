@@ -223,6 +223,13 @@ Setup (one time):
 
 Users who have not connected fall back to the shared `GH_TOKEN`.
 
+**Mandatory GitHub login:** set `DASHBOARD_REQUIRE_GITHUB=1` (with
+`GITHUB_OAUTH_CLIENT_ID` configured) and PR search, job status, and retests
+all *require* a connected GitHub session and run with that user's token —
+the shared `GH_TOKEN` is never used and can be omitted entirely. With both
+this and the OAuth client set, the container needs no personal credentials
+for GitHub at all.
+
 ### Per-User Vertex Analysis via Google Sign-In (optional)
 
 With `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` set, the
