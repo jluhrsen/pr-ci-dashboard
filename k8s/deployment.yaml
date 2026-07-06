@@ -79,11 +79,11 @@ spec:
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /secrets/gcp/sa.json
 
-        # Per-user GitHub OAuth (device flow): set to your GitHub OAuth App
-        # client ID to show the "Connect GitHub" UI; retests then post as the
-        # connected user. The client ID is public, not a secret.
-        # - name: GITHUB_OAUTH_CLIENT_ID
-        #   value: Ov23li...
+        # Per-user GitHub OAuth (device flow): the team client ID and
+        # DASHBOARD_REQUIRE_GITHUB=1 are baked into the image; override here
+        # to disable or use a different OAuth app
+        # - name: DASHBOARD_REQUIRE_GITHUB
+        #   value: "0"
 
         # Shared fallback GitHub token (used when a user has not connected):
         # injected via `oc set env deploy/pr-ci-dashboard --from=secret/github-token`
@@ -94,16 +94,9 @@ spec:
         # (secret keys GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET).
         # Signed-out users fall back to the mounted GCP credentials.
 
-        # Mandatory login: with Google OAuth configured, set to require a
-        # signed-in Google session for all API access (sign-in gate in the UI)
-        # - name: DASHBOARD_REQUIRE_LOGIN
-        #   value: "1"
-
-        # Mandatory GitHub login: with GITHUB_OAUTH_CLIENT_ID set, search/job
-        # status/retest require a connected GitHub session and use that
-        # user's token (GH_TOKEN fallback never used, secret can be dropped)
-        # - name: DASHBOARD_REQUIRE_GITHUB
-        #   value: "1"
+        # Mandatory Google login (DASHBOARD_REQUIRE_LOGIN=1 baked into the
+        # image) activates once GOOGLE_OAUTH_CLIENT_SECRET is injected via
+        # the google-oauth secret; override to "0" here to disable
 
         volumeMounts:
         - name: data

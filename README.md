@@ -201,11 +201,22 @@ podman run -p 5000:5000 \
   pr-ci-dashboard:latest
 ```
 
-**Requirements:**
-- Mount `/data` for SQLite database persistence
-- Mount GCP service account credentials for Vertex AI
-- GitHub authentication: set `GH_TOKEN` for the shared fallback token, and
-  optionally `GITHUB_OAUTH_CLIENT_ID` for per-user retests (see below)
+**Requirements (team image):** the OAuth app client IDs and require-login
+flags are baked into the image - each user logs in as themselves, and no
+personal credentials are mounted. Supply only the team's Google client
+secret (shared privately, not in this repo):
+
+```bash
+echo "GOOGLE_OAUTH_CLIENT_SECRET=<secret-from-your-team>" > ~/.config/fb.env && chmod 600 ~/.config/fb.env
+podman run -d --name flake-buster -p 127.0.0.1:5000:5000 --env-file ~/.config/fb.env -v fb-data:/data quay.io/jluhrsen/pr-ci-dashboard:latest
+```
+
+Open http://127.0.0.1:5000 (use 127.0.0.1 - rootless podman publishes IPv4
+only), connect GitHub (short code), sign in with Google (redhat.com; click
+through the unverified-app warning). Your address must be on the OAuth
+app's test-users list. Overrides: any baked value can be replaced with
+`-e VAR=...` (e.g. `-e DASHBOARD_REQUIRE_GITHUB=0` plus `-e GH_TOKEN=...`
+and mounted GCP credentials for the classic single-user mode).
 
 ### Per-User GitHub Retests (optional)
 

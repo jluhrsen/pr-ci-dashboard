@@ -79,6 +79,23 @@ ENV ANTHROPIC_MODEL=claude-opus-4-6
 # Runtime mount: /data PVC for persistence
 ENV PR_CI_DASHBOARD_DB=/data/dashboard.db
 
+# Team OAuth app configuration (public identifiers, not secrets - the
+# GitHub device flow needs no secret at all, and the Google client SECRET
+# must still be supplied at runtime: -e GOOGLE_OAUTH_CLIENT_SECRET=...)
+# With these baked in, users log in as themselves and no personal
+# credentials (GH_TOKEN, ADC files) are ever mounted into the container.
+# Override with -e VAR=... (e.g. DASHBOARD_REQUIRE_GITHUB=0) if needed.
+ENV GITHUB_OAUTH_CLIENT_ID=Ov23liLmjAh5KwHYZyWZ
+ENV GOOGLE_OAUTH_CLIENT_ID=816757612936-h46lulfebmbc7f3lkha4u7hpae3e9qmd.apps.googleusercontent.com
+# Require the GitHub connection for search/job-status/retest (active
+# because the client ID above is set)
+ENV DASHBOARD_REQUIRE_GITHUB=1
+# Require Google sign-in for all API access - inert until
+# GOOGLE_OAUTH_CLIENT_SECRET is provided at runtime, so a container
+# without the secret still works (GitHub-only, analysis via mounted
+# credentials if any)
+ENV DASHBOARD_REQUIRE_LOGIN=1
+
 # Install ai-helpers plugin as runtime user
 # Plugin must install after HOME is set and USER is switched
 # Plugin install requires network access to plugin registry
