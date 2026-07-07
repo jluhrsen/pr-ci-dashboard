@@ -8,6 +8,7 @@ from flask import Flask, jsonify, request, render_template, session, redirect
 from .utils.script_fetcher import fetch_scripts
 from .utils.gh_auth import check_gh_auth
 from .utils import github_oauth
+from .utils import github_app
 from .utils import google_oauth
 from .utils.session_store import (
     GITHUB_SESSIONS, PENDING_DEVICE_FLOWS, GOOGLE_SESSIONS,
@@ -74,10 +75,21 @@ def _login_required_enabled():
 def _github_required_enabled():
     """GitHub-login gate for gh-backed endpoints (search, job status,
     retest): DASHBOARD_REQUIRE_GITHUB truthy AND GitHub OAuth configured.
-    With this on, those endpoints run with the user's own token and the
-    pod-level GH_TOKEN fallback is never used."""
+    A mounted GitHub App key (bot mode) satisfies the requirement instead:
+    gh operations then run as the bot, and connecting GitHub stays optional
+    (a connected user's own token still takes priority)."""
     flag = os.environ.get('DASHBOARD_REQUIRE_GITHUB', '').strip().lower() in ('1', 'true', 'yes', 'on')
-    return flag and github_oauth.get_client_id() is not None
+    return flag and github_oauth.get_client_id() is not None and not github_app.configured()
+
+
+def _effective_github_token():
+    """Token for gh subprocesses: connected user's token, else the bot's
+    installation token (when the App key is mounted), else None (ambient
+    gh auth / GH_TOKEN env)."""
+    github = get_session_github()
+    if github:
+        return github['token']
+    return github_app.get_bot_token()
 
 
 def _github_gate():
@@ -207,10 +219,8 @@ def api_search():
     gate = _github_gate()
     if gate:
         return gate
-    github = get_session_github()
 
-    result = search_prs(query, page, per_page,
-                        token=github['token'] if github else None)
+    result = search_prs(query, page, per_page, token=_effective_github_token())
     return jsonify(result)
 
 
@@ -225,10 +235,8 @@ def api_pr_jobs(owner, repo, pr_number):
     gate = _github_gate()
     if gate:
         return gate
-    github = get_session_github()
 
-    result = get_pr_jobs(owner, repo, pr_number,
-                         token=github['token'] if github else None)
+    result = get_pr_jobs(owner, repo, pr_number, token=_effective_github_token())
     return jsonify(result)
 
 
@@ -266,11 +274,9 @@ def api_retest():
     if gate:
         return gate
 
-    # Post as the connected GitHub user when available; without the
-    # DASHBOARD_REQUIRE_GITHUB gate, fall back to the pod-level GH_TOKEN
-    # (Phase 1 behavior)
-    github = get_session_github()
-    token = github['token'] if github else None
+    # Post as the connected GitHub user when available; else as the bot
+    # (App key mounted); else ambient GH_TOKEN (Phase 1 behavior)
+    token = _effective_github_token()
 
     result = retest_jobs(owner, repo, pr, jobs, job_type, token=token)
     record_audit(current_actor(), 'retest', f"{owner}/{repo}#{pr} {jobs}",

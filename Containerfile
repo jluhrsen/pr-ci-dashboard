@@ -96,6 +96,14 @@ ENV DASHBOARD_REQUIRE_GITHUB=1
 # credentials if any)
 ENV DASHBOARD_REQUIRE_LOGIN=1
 
+# GitHub App bot mode (openshift-pr-manager[bot]): the App ID is public
+# (openshift/release step-registry) and the key path is a convention -
+# bot mode activates only when the private key is actually mounted there.
+# gh operations then run as the bot (org-approved GitHub App), and the
+# GitHub login requirement above is satisfied automatically.
+ENV GITHUB_APP_ID=1460951
+ENV GITHUB_APP_PRIVATE_KEY_FILE=/secrets/github-app/private-key.pem
+
 # Install ai-helpers plugin as runtime user
 # Plugin must install after HOME is set and USER is switched
 # Plugin install requires network access to plugin registry

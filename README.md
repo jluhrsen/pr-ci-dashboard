@@ -234,6 +234,31 @@ Setup (one time):
 
 Users who have not connected fall back to the shared `GH_TOKEN`.
 
+### Bot Mode: openshift-pr-manager (recommended for openshift repos)
+
+Mount the openshift-pr-manager GitHub App's private key and all gh
+operations (search, job status, retests) run as `openshift-pr-manager[bot]`
+— the account that authors these PRs. GitHub Apps are installed on the org,
+so the openshift org's OAuth-app restrictions don't apply. The key only
+signs short-lived JWTs that mint ~1-hour installation tokens; connected
+users' own tokens still take priority, and the dashboard audit log records
+which human clicked regardless.
+
+The key is a real secret: never commit it, and keep the host copy 0600.
+Retrieve it from your team's approved secret manager (ask your team where
+the GitHub App key lives). Local run uses a **podman secret**
+(delivers the key to the container's runtime UID with mode 0400; no
+world-readable bind-mount copies):
+
+```bash
+podman secret create fb-github-app-key ~/.config/fb-bot-key.pem
+podman run -d --name flake-buster -p 127.0.0.1:5000:5000 --env-file ~/.config/fb.env -v fb-data:/data --secret source=fb-github-app-key,type=mount,target=/secrets/github-app/private-key.pem,uid=1001,gid=0,mode=0400 quay.io/jluhrsen/pr-ci-dashboard:latest
+```
+
+Cluster: `oc create secret generic github-app --from-file=private-key.pem=/path/to/key.pem`
+(the deployment mounts it optionally; without it, per-user GitHub login is
+required instead).
+
 **Mandatory GitHub login:** set `DASHBOARD_REQUIRE_GITHUB=1` (with
 `GITHUB_OAUTH_CLIENT_ID` configured) and PR search, job status, and retests
 all *require* a connected GitHub session and run with that user's token —

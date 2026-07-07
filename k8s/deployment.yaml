@@ -106,6 +106,10 @@ spec:
           mountPath: /secrets/gcp
           readOnly: true
 
+        - name: github-app
+          mountPath: /secrets/github-app
+          readOnly: true
+
         # RAM-backed /tmp: transient per-user Google credential files for
         # Vertex-as-user analysis never touch disk
         - name: tmp
@@ -149,6 +153,15 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 64Mi
+
+      - name: github-app
+        secret:
+          secretName: github-app
+          # Optional: bot mode for gh operations (openshift-pr-manager).
+          # Created manually from the team Vault collection:
+          # oc create secret generic github-app \
+          #   --from-file=private-key.pem=/path/to/key.pem
+          optional: true
 
       - name: gcp-credentials
         secret:
