@@ -111,12 +111,12 @@ ENV GOOGLE_OAUTH_HOSTED_DOMAIN=redhat.com
 ENV GITHUB_APP_ID=1460951
 ENV GITHUB_APP_PRIVATE_KEY_FILE=/secrets/github-app/private-key.pem
 
-# Install ai-helpers plugin as runtime user
+# Install ai-helpers plugin as runtime user from PR #512 (detect-permafail skill)
 # Plugin must install after HOME is set and USER is switched
 # Plugin install requires network access to plugin registry
 # Build will fail in environments without registry access (intentional - no silent partial builds)
-# Matches run.sh install flow: marketplace add then plugin install
-RUN claude plugin marketplace add openshift-eng/ai-helpers && \
+# Using PR #512 (branch CORENET-7149 from jluhrsen/ai-helpers) until detect-permafail is merged
+RUN claude plugin marketplace add https://github.com/jluhrsen/ai-helpers.git#CORENET-7149 && \
     claude plugin install ci@ai-helpers
 
 # Verify plugin installed successfully via CLI
