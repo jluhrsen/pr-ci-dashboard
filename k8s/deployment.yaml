@@ -64,12 +64,12 @@ spec:
           value: /data/dashboard.db
 
         # Claude Code Vertex AI configuration
-        # <internal> project: human users hold Vertex IAM here (the hybrid project
-        # used by openshift/release CI only entitles service accounts)
+        # Set your Vertex project (required for analysis): the project
+        # where your users hold Vertex IAM
         - name: CLAUDE_CODE_USE_VERTEX
           value: "1"
         - name: ANTHROPIC_VERTEX_PROJECT_ID
-          value: <internal-vertex-project>
+          value: <your-vertex-project>
         - name: CLOUD_ML_REGION
           value: global
         # Model pin required: newer CLI default models are not enabled on

@@ -67,12 +67,12 @@ USER 1001
 # These require runtime secrets mounted:
 # - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp/sa.json (mounted at runtime)
 ENV CLAUDE_CODE_USE_VERTEX=1
-# <internal> project: human users hold Vertex IAM here (the hybrid project used by
-# openshift/release CI only entitles service accounts)
-ENV ANTHROPIC_VERTEX_PROJECT_ID=<internal-vertex-project>
+# Deployers must supply their Vertex project at runtime
+# (-e ANTHROPIC_VERTEX_PROJECT_ID=<your-vertex-project> or an env file);
+# use the project where your users hold Vertex IAM
 ENV CLOUD_ML_REGION=global
-# Model must be pinned: newer CLI default models are not enabled on the
-# <internal> Vertex projects and 403 (data-sharing / IAM "may not exist" errors)
+# Model pinned: newer CLI default models may not be enabled on a given
+# Vertex project (data-sharing / IAM errors); override if yours differs
 ENV ANTHROPIC_MODEL=claude-opus-4-6
 
 # Dashboard database path

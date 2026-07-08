@@ -207,7 +207,7 @@ personal credentials are mounted. Supply only the team's Google client
 secret (shared privately, not in this repo):
 
 ```bash
-echo "GOOGLE_OAUTH_CLIENT_SECRET=<secret-from-your-team>" > ~/.config/fb.env && chmod 600 ~/.config/fb.env
+printf 'GOOGLE_OAUTH_CLIENT_SECRET=<secret-from-your-team>\nANTHROPIC_VERTEX_PROJECT_ID=<your-vertex-project>\n' > ~/.config/fb.env && chmod 600 ~/.config/fb.env
 podman run -d --name flake-buster -p 127.0.0.1:5000:5000 --env-file ~/.config/fb.env -v fb-data:/data quay.io/jluhrsen/pr-ci-dashboard:latest
 ```
 
@@ -244,7 +244,6 @@ signs short-lived JWTs that mint ~1-hour installation tokens; connected
 users' own tokens still take priority, and the dashboard audit log records
 which human clicked regardless.
 
-The key is a real secret: never commit it, and keep the host copy 0600.
 The key is a real secret: never commit it, and keep the host copy 0600.
 Retrieve it from your team's approved secret manager (for CI Vault users:
 self-service OIDC login, then a kv fetch shaped like the below — ask your
