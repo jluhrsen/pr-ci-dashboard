@@ -473,7 +473,11 @@ def api_google_oauth_callback():
         print(f"[ERROR] Google token exchange failed: {e}")
         return redirect('/?google_auth=failed')
 
-    email = google_oauth.email_from_id_token(tokens.get('id_token', ''), client_id=client_id) or 'unknown'
+    email = google_oauth.email_from_id_token(tokens.get('id_token', ''), client_id=client_id)
+    if not email:
+        # Bad claims (wrong domain, expired, wrong audience): no session
+        print("[ERROR] Google sign-in rejected: id_token claims failed validation")
+        return redirect('/?google_auth=failed')
     sid = _session_id()
     GOOGLE_SESSIONS[sid] = {
         "adc": google_oauth.build_adc(client_id, client_secret, tokens['refresh_token']),

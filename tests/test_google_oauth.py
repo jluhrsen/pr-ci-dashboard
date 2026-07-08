@@ -335,3 +335,60 @@ def test_streaming_overall_timeout_kills_child():
     assert 'timed out' in final['data']['error']
     assert spawned['proc'].poll() is not None       # child terminated
     assert not os.path.exists(spawned['adc_path'])  # ADC cleaned
+
+
+def test_auth_url_forces_account_picker():
+    """select_account must be in the prompt so Google can't silently reuse
+    the browser's default (often personal) session."""
+    url = google_oauth.build_auth_url('cid', 'http://localhost:5000/cb', 's', 'c')
+    assert 'select_account' in url and 'consent' in url
+
+
+def test_auth_url_hd_param(monkeypatch):
+    monkeypatch.setenv('GOOGLE_OAUTH_HOSTED_DOMAIN', 'redhat.com')
+    url = google_oauth.build_auth_url('cid', 'http://localhost:5000/cb', 's', 'c')
+    assert 'hd=redhat.com' in url
+
+    monkeypatch.delenv('GOOGLE_OAUTH_HOSTED_DOMAIN')
+    url = google_oauth.build_auth_url('cid', 'http://localhost:5000/cb', 's', 'c')
+    assert 'hd=' not in url
+
+
+def _fake_id_token_hd(email, hd=None):
+    import time
+    claims = {'email': email, 'iss': 'https://accounts.google.com',
+              'aud': 'cid.apps.googleusercontent.com', 'exp': time.time() + 3600}
+    if hd:
+        claims['hd'] = hd
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+    return f'h.{payload}.s'
+
+
+def test_hosted_domain_enforced(monkeypatch):
+    """With a hosted domain configured, only tokens carrying that hd claim
+    pass - a personal gmail (no hd claim) is rejected even if allowlisted."""
+    monkeypatch.setenv('GOOGLE_OAUTH_HOSTED_DOMAIN', 'redhat.com')
+    good = _fake_id_token_hd('a@redhat.com', hd='redhat.com')
+    gmail = _fake_id_token_hd('a@gmail.com')          # no hd claim
+    other = _fake_id_token_hd('a@evil.com', hd='evil.com')
+
+    assert google_oauth.email_from_id_token(good) == 'a@redhat.com'
+    assert google_oauth.email_from_id_token(gmail) is None
+    assert google_oauth.email_from_id_token(other) is None
+
+
+def test_callback_rejects_wrong_domain(client, oauth_env, monkeypatch):
+    """A wrong-domain sign-in fails the callback: no session created."""
+    monkeypatch.setenv('GOOGLE_OAUTH_HOSTED_DOMAIN', 'redhat.com')
+    client.get('/api/google/oauth/login')
+    with client.session_transaction() as sess:
+        state = sess['google_oauth_state']
+
+    with patch.object(google_oauth, 'exchange_code', return_value={
+        'refresh_token': 'rt', 'access_token': 'at',
+        'id_token': _fake_id_token_hd('a@gmail.com')}):
+        response = client.get(f'/api/google/oauth/callback?code=abc&state={state}')
+
+    assert response.status_code == 302
+    assert 'google_auth=failed' in response.location
+    assert client.get('/api/google/oauth/status').get_json()['connected'] is False

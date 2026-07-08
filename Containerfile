@@ -95,6 +95,9 @@ ENV DASHBOARD_REQUIRE_GITHUB=1
 # without the secret still works (GitHub-only, analysis via mounted
 # credentials if any)
 ENV DASHBOARD_REQUIRE_LOGIN=1
+# Only redhat.com workspace accounts may sign in (picker pre-filtered,
+# hd claim enforced server-side)
+ENV GOOGLE_OAUTH_HOSTED_DOMAIN=redhat.com
 
 # GitHub App bot mode (openshift-pr-manager[bot]): the App ID is public
 # (openshift/release step-registry) and the key path is a convention -

@@ -42,9 +42,14 @@ def make_pkce_pair():
     return verifier, challenge
 
 
+def hosted_domain():
+    """Workspace domain logins must belong to, or None (any account)."""
+    return os.environ.get('GOOGLE_OAUTH_HOSTED_DOMAIN') or None
+
+
 def build_auth_url(client_id, redirect_uri, state, code_challenge):
     """Build the Google authorization URL the browser is redirected to."""
-    params = urllib.parse.urlencode({
+    params = {
         'client_id': client_id,
         'redirect_uri': redirect_uri,
         'response_type': 'code',
@@ -53,11 +58,17 @@ def build_auth_url(client_id, redirect_uri, state, code_challenge):
         'code_challenge': code_challenge,
         'code_challenge_method': 'S256',
         # offline + consent guarantees a refresh token, which the
-        # authorized_user ADC format requires
+        # authorized_user ADC format requires; select_account forces the
+        # account picker so Google can't silently reuse the browser's
+        # default session (often a personal gmail)
         'access_type': 'offline',
-        'prompt': 'consent',
-    })
-    return f'{AUTH_URL}?{params}'
+        'prompt': 'consent select_account',
+    }
+    # Pre-filter the account picker to the workspace domain (advisory only;
+    # the hd claim is enforced server-side in email_from_id_token)
+    if hosted_domain():
+        params['hd'] = hosted_domain()
+    return f'{AUTH_URL}?{urllib.parse.urlencode(params)}'
 
 
 def _post_form(url, fields, timeout=10):
@@ -119,6 +130,11 @@ def email_from_id_token(id_token, client_id=None):
             return None
         exp = payload.get('exp')
         if not isinstance(exp, (int, float)) or exp < time.time():
+            return None
+        # Enforce the workspace domain: the hd claim only exists for
+        # workspace accounts, so a personal gmail is rejected here even if
+        # someone allowlists one as a test user
+        if hosted_domain() and payload.get('hd') != hosted_domain():
             return None
 
         return payload.get('email')
