@@ -196,3 +196,81 @@ def test_session_token_beats_bot_token(client, bot_env, monkeypatch):
          patch('pr_ci_dashboard.server.search_prs', return_value={"prs": [], "total": 0}) as mock_search:
         client.post('/api/search', json={"query": "is:pr"})
     assert mock_search.call_args[1]['token'] == 'gho_user_tok'
+
+
+def test_status_reports_bot_active(client, bot_env):
+    assert client.get('/api/github/oauth/status').get_json()['bot_active'] is True
+
+
+def test_status_reports_bot_inactive(client, monkeypatch):
+    monkeypatch.delenv('GITHUB_APP_ID', raising=False)
+    assert client.get('/api/github/oauth/status').get_json()['bot_active'] is False
+
+
+def test_retest_org_blocked_user_token_falls_back_to_bot(client, bot_env, monkeypatch):
+    """A connected user's org-blocked token must not fail the retest when the
+    bot can do it: retry as bot, audit the substitution."""
+    monkeypatch.setenv('GITHUB_OAUTH_CLIENT_ID', 'cid')
+    from pr_ci_dashboard.utils import github_oauth
+    with patch.object(github_oauth, 'start_device_flow', return_value={
+        'device_code': 'dc', 'user_code': 'X', 'verification_uri': 'u',
+        'interval': 5, 'expires_in': 900}):
+        client.post('/api/github/oauth/start')
+    with patch.object(github_oauth, 'poll_device_flow',
+                      return_value={'status': 'success', 'token': 'gho_user_tok'}), \
+         patch.object(github_oauth, 'get_github_login', return_value='someuser'):
+        client.post('/api/github/oauth/poll')
+
+    org_error = {"error": "GraphQL: Although you appear to have the correct authorization "
+                          "credentials, the `openshift` organization has enabled OAuth App "
+                          "access restrictions... (addComment)"}
+
+    def fake_retest(owner, repo, pr, jobs, job_type, token=None):
+        return {"success": True} if token == 'ghs_bot_tok' else org_error
+
+    with patch.object(github_app, 'get_bot_token', return_value='ghs_bot_tok'), \
+         patch('pr_ci_dashboard.server.retest_jobs', side_effect=fake_retest) as mock_retest:
+        response = client.post('/api/retest', json={
+            "owner": "openshift", "repo": "origin", "pr": 1,
+            "jobs": ["e2e-aws"], "type": "e2e"})
+
+    assert response.get_json() == {"success": True}
+    assert mock_retest.call_count == 2
+    assert mock_retest.call_args_list[0][1]['token'] == 'gho_user_tok'
+    assert mock_retest.call_args_list[1][1]['token'] == 'ghs_bot_tok'
+
+    audit = client.get('/api/audit').get_json()
+    assert audit[0]['result'] == 'success (as bot; user token org-blocked)'
+
+
+def test_retest_other_errors_not_retried(client, bot_env, monkeypatch):
+    """Only the org-restriction error triggers the bot retry."""
+    with patch.object(github_app, 'get_bot_token', return_value='ghs_bot_tok'), \
+         patch('pr_ci_dashboard.server.retest_jobs',
+               return_value={"error": "some other failure"}) as mock_retest:
+        client.post('/api/retest', json={
+            "owner": "openshift", "repo": "origin", "pr": 1,
+            "jobs": ["e2e-aws"], "type": "e2e"})
+    assert mock_retest.call_count == 1
+
+
+def test_auth_status_reports_bot_mode(client, bot_env):
+    """The legacy 'run gh auth login' banner must not appear in bot mode."""
+    with patch.object(github_app, 'get_bot_token', return_value='ghs_bot_tok'):
+        status = client.get('/api/auth/status').get_json()
+    assert status == {"authenticated": True, "method": "bot"}
+
+
+def test_auth_status_reports_broken_bot_key(client, bot_env):
+    with patch.object(github_app, 'get_bot_token', return_value=None):
+        status = client.get('/api/auth/status').get_json()
+    assert status['authenticated'] is False
+    assert 'minting failed' in status['error']
+
+
+def test_auth_status_falls_back_to_ambient(client, monkeypatch):
+    monkeypatch.delenv('GITHUB_APP_ID', raising=False)
+    with patch('pr_ci_dashboard.server.check_gh_auth',
+               return_value={"authenticated": True, "error": None}):
+        status = client.get('/api/auth/status').get_json()
+    assert status == {"authenticated": True, "error": None}

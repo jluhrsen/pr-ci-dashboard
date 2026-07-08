@@ -298,6 +298,12 @@ async function initGithubConnect() {
         if (!status.enabled) {
             return; // feature not configured server-side; keep UI hidden
         }
+        if (status.bot_active && !status.connected) {
+            // Bot mode handles gh operations; personal connect is hidden
+            // because org policy blocks unapproved OAuth app writes - a
+            // connected user token would make retests WORSE, not better
+            return;
+        }
         document.getElementById('github-connect').classList.remove('hidden');
         renderGithubState(status.connected ? status.login : null);
 

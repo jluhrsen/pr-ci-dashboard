@@ -192,7 +192,16 @@ def healthz():
 
 @app.route('/api/auth/status')
 def auth_status():
-    """Check GitHub CLI authentication status."""
+    """Effective GitHub auth for gh operations, in token-priority order:
+    connected session, bot App key (verified by actually minting a token,
+    so a broken key shows the banner), then ambient gh CLI login."""
+    if get_session_github() is not None:
+        return jsonify({"authenticated": True, "method": "session"})
+    if github_app.configured():
+        if github_app.get_bot_token():
+            return jsonify({"authenticated": True, "method": "bot"})
+        return jsonify({"authenticated": False,
+                        "error": "GitHub App key mounted but token minting failed (see pod logs)"})
     return jsonify(check_gh_auth())
 
 
@@ -276,12 +285,28 @@ def api_retest():
 
     # Post as the connected GitHub user when available; else as the bot
     # (App key mounted); else ambient GH_TOKEN (Phase 1 behavior)
-    token = _effective_github_token()
+    github = get_session_github()
+    token = github['token'] if github else github_app.get_bot_token()
 
     result = retest_jobs(owner, repo, pr, jobs, job_type, token=token)
+
+    # A connected user's OAuth token can be blocked by org policy (OAuth App
+    # access restrictions) even though the bot's installation token works.
+    # Honor the user's intent: retry as the bot rather than failing.
+    used_bot_fallback = False
+    if (not result.get('success')
+            and 'OAuth App access restrictions' in str(result.get('error', ''))
+            and github is not None):
+        bot_token = github_app.get_bot_token()
+        if bot_token:
+            result = retest_jobs(owner, repo, pr, jobs, job_type, token=bot_token)
+            used_bot_fallback = True
+
+    outcome = 'success' if result.get('success') else f"error: {result.get('error')}"
+    if used_bot_fallback and result.get('success'):
+        outcome = 'success (as bot; user token org-blocked)'
     record_audit(current_actor(), 'retest', f"{owner}/{repo}#{pr} {jobs}",
-                 'success' if result.get('success') else f"error: {result.get('error')}",
-                 db_path=app.config.get('DB_PATH'))
+                 outcome, db_path=app.config.get('DB_PATH'))
     return jsonify(result)
 
 
@@ -307,7 +332,10 @@ def api_github_oauth_status():
         "enabled": client_id is not None,
         "connected": github is not None,
         "login": github['login'] if github else None,
-        "login_required": _github_required_enabled()
+        "login_required": _github_required_enabled(),
+        # Bot mode: gh operations run as the GitHub App; personal connect is
+        # hidden in the UI (org policy blocks unapproved OAuth app writes)
+        "bot_active": github_app.configured()
     })
 
 
