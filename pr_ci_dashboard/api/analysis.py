@@ -203,8 +203,10 @@ def analyze_job_stream():
             finally:
                 # Cache results even if client disconnects (runs in finally block)
                 print(f"[DEBUG] Finally block: final_result={final_result is not None}, has_error={'error' in final_result if final_result else 'N/A'}")
-                if final_result and "error" not in final_result:
-                    print(f"[DEBUG] Caching analysis for {data['job_name']}: {len(data['job_urls'])} URLs, permafail={final_result.get('permafail')}")
+                if final_result:
+                    # Cache ALL results including errors, because user saw the terminal output
+                    # and took action. Not caching means they have to analyze again.
+                    print(f"[DEBUG] Caching analysis for {data['job_name']}: {len(data['job_urls'])} URLs, permafail={final_result.get('permafail')}, has_error={'error' in final_result}")
                     for i, url in enumerate(data["job_urls"]):
                         signature = final_result.get("signatures", [])[i] if i < len(final_result.get("signatures", [])) else {}
                         store_analysis(
@@ -218,7 +220,7 @@ def analyze_job_stream():
                         )
                     print(f"[DEBUG] Successfully cached {len(data['job_urls'])} URL(s) for {data['job_name']}")
                 else:
-                    print(f"[DEBUG] NOT caching - final_result={final_result}, error={final_result.get('error') if final_result else 'no result'}")
+                    print(f"[DEBUG] NOT caching - no final_result")
 
                 # Audit with the actor resolved back in request context
                 if final_result is not None:
