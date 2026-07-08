@@ -142,6 +142,9 @@ Uses a Red Hat-vetted component for login; defers the Google OAuth client work.
       frontend migrates any legacy localStorage state to the server once on
       page load. (Previously browser localStorage keyed by origin — didn't
       follow users, leaked between backends on the same host:port.)
+- [ ] Convert GET /api/jobs/status to POST with a JSON body: job-URL lists
+      belong in a request body, not an 8KB+ query string (currently handled
+      by gunicorn limit_request_line=0).
 - [ ] GitOps delivery (ArgoCD) instead of laptop `oc apply`.
 
 ## Known credential-hygiene debt (Phase 1)

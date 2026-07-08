@@ -681,6 +681,10 @@ def run_gunicorn(flask_app, port):
             self.cfg.set('workers', 1)
             self.cfg.set('worker_class', 'gthread')
             self.cfg.set('threads', 16)
+            # /api/jobs/status sends job-URL lists in the query string,
+            # easily >8KB; gunicorn's 4094-byte default rejected them
+            # (Werkzeug had no such limit). 0 = unlimited.
+            self.cfg.set('limit_request_line', 0)
             # SSE analyze streams legitimately run up to 5 minutes
             self.cfg.set('timeout', 600)
             self.cfg.set('accesslog', '-')
