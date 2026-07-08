@@ -202,7 +202,9 @@ def analyze_job_stream():
                     yield f"data: {event_json}\n\n"
             finally:
                 # Cache results even if client disconnects (runs in finally block)
+                print(f"[DEBUG] Finally block: final_result={final_result is not None}, has_error={'error' in final_result if final_result else 'N/A'}")
                 if final_result and "error" not in final_result:
+                    print(f"[DEBUG] Caching analysis for {data['job_name']}: {len(data['job_urls'])} URLs, permafail={final_result.get('permafail')}")
                     for i, url in enumerate(data["job_urls"]):
                         signature = final_result.get("signatures", [])[i] if i < len(final_result.get("signatures", [])) else {}
                         store_analysis(
@@ -214,6 +216,9 @@ def analyze_job_stream():
                             permafail_result=final_result,
                             db_path=db_path
                         )
+                    print(f"[DEBUG] Successfully cached {len(data['job_urls'])} URL(s) for {data['job_name']}")
+                else:
+                    print(f"[DEBUG] NOT caching - final_result={final_result}, error={final_result.get('error') if final_result else 'no result'}")
 
                 # Audit with the actor resolved back in request context
                 if final_result is not None:
