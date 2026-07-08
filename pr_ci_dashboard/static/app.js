@@ -1946,9 +1946,9 @@ function createAnalyzeButton() {
 function createCheckPermafailButton(job, owner, repo, number) {
     const btn = createElement('button', 'btn btn-secondary check-permafail-btn', 'Check for Permafail');
 
-    // Show button only if 2+ consecutive failures
+    // Show button only if meets permafail check threshold
     const consecutiveFailures = job.urls?.length || job.consecutive || 0;
-    if (consecutiveFailures < 2) {
+    if (consecutiveFailures < PERMAFAIL_CHECK_THRESHOLD) {
         btn.style.display = 'none';
     }
 
