@@ -18,6 +18,24 @@ client secret, App private key) are runtime inputs only. See README for
 run recipes and `docs/specs/2026-07-02-security-hardening-plan.md` for the
 security posture and remaining work.
 
+## Local run (known-good invocation shape)
+
+```bash
+# once per machine: bot key from your team's secret manager -> podman secret
+podman secret create fb-github-app-key ~/.config/fb-bot-key.pem
+# once: runtime config (the two values the image does not bake)
+printf 'GOOGLE_OAUTH_CLIENT_SECRET=<secret-from-your-team>\nANTHROPIC_VERTEX_PROJECT_ID=<your-vertex-project>\n' > ~/.config/fb.env && chmod 600 ~/.config/fb.env
+# run - browse http://127.0.0.1:<host-port> (NOT localhost: rootless podman
+# publishes IPv4 only); the OAuth redirect URI registered for the Google
+# client must exactly match host+port in the browser address bar
+podman run -d --name flake-buster -p 127.0.0.1:5000:5000 --env-file ~/.config/fb.env -v fb-data:/data --secret source=fb-github-app-key,type=mount,target=/secrets/github-app/private-key.pem,uid=1001,gid=0,mode=0400 quay.io/jluhrsen/pr-ci-dashboard:latest
+```
+
+Container listens on 5000 internally; any host port works via
+`-p 127.0.0.1:<host-port>:5000`. Update = `podman pull` (once CI/quay is
+current) + `podman rm -f flake-buster` + re-run; the fb-data volume keeps
+the database.
+
 ## State at handoff
 
 - GitHub bot chain field-verified end to end, including a live retest
