@@ -245,8 +245,19 @@ users' own tokens still take priority, and the dashboard audit log records
 which human clicked regardless.
 
 The key is a real secret: never commit it, and keep the host copy 0600.
-Retrieve it from your team's approved secret manager (ask your team where
-the GitHub App key lives). Local run uses a **podman secret**
+The key is a real secret: never commit it, and keep the host copy 0600.
+Retrieve it from your team's approved secret manager (for CI Vault users:
+self-service OIDC login, then a kv fetch shaped like the below — ask your
+team for the actual address, collection, and field names):
+
+```bash
+export VAULT_ADDR=<your-vault-url>
+vault login -method=oidc
+F=<github-app-private-key-field>
+vault kv get -field=$F kv/selfservice/<your-team-collection>/$F > ~/.config/fb-bot-key.pem && chmod 600 ~/.config/fb-bot-key.pem
+```
+
+Local run uses a **podman secret**
 (delivers the key to the container's runtime UID with mode 0400; no
 world-readable bind-mount copies):
 
