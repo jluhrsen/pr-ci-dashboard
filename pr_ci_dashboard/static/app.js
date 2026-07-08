@@ -1119,16 +1119,36 @@ function renderNonPermafailInfo(jobElement, reason, fullResult = null) {
     const existing = jobElement.querySelector('.analysis-info-icon');
     if (existing) existing.remove();
 
-    // Add info icon (using emoji)
-    const icon = document.createElement('span');
-    icon.className = 'analysis-info-icon';
-    icon.textContent = 'ℹ️';
-    icon.title = 'Click to view analysis reasoning';
-    icon.style.cursor = 'pointer';
-    icon.style.marginLeft = '8px';
-    icon.style.fontSize = '16px';
-    icon.onclick = () => showPermafailModal(reason, false, fullResult);
-    jobHeader.appendChild(icon);
+    // Add info icon with badge - more prominent than just emoji
+    const iconContainer = document.createElement('span');
+    iconContainer.className = 'analysis-info-icon';
+    iconContainer.tabIndex = 0;
+    iconContainer.setAttribute('role', 'button');
+    iconContainer.setAttribute('aria-label', 'View analysis reasoning');
+
+    const checkmark = document.createElement('span');
+    checkmark.className = 'analysis-checkmark';
+    checkmark.textContent = '✓';
+
+    const label = document.createElement('span');
+    label.className = 'analysis-label';
+    label.textContent = 'Analyzed';
+
+    iconContainer.appendChild(checkmark);
+    iconContainer.appendChild(label);
+
+    // Click handler
+    iconContainer.onclick = () => showPermafailModal(reason, false, fullResult);
+
+    // Keyboard accessibility
+    iconContainer.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            showPermafailModal(reason, false, fullResult);
+        }
+    });
+
+    jobHeader.appendChild(iconContainer);
 }
 
 function showPermafailModal(reason, isPermafail = true, fullResult = null) {
@@ -1240,15 +1260,20 @@ function clearPermafailUI(jobElement, jobKey) {
     const warning = jobElement.querySelector('.permafail-warning');
     if (warning) warning.remove();
 
+    // Remove analysis info badge (for non-permafail cached results)
+    const analysisIcon = jobElement.querySelector('.analysis-info-icon');
+    if (analysisIcon) analysisIcon.remove();
+
     // Re-enable retest button
     const retestBtn = jobElement.querySelector('.job-actions button.btn:not(.btn-secondary)');
     if (retestBtn) {
         retestBtn.disabled = false;
     }
 
-    // Re-enable "Check for Permafail" button
+    // Re-enable and restore "Check for Permafail" button
     const checkBtn = jobElement.querySelector('.check-permafail-btn');
     if (checkBtn) {
+        checkBtn.style.display = '';
         checkBtn.disabled = false;
         checkBtn.textContent = 'Check for Permafail';
     }
@@ -1258,20 +1283,42 @@ function clearPermafailUI(jobElement, jobKey) {
 }
 
 async function loadCachedPermafailResults(list, failedJobs) {
-    // Collect all job URLs
-    const jobUrls = [];
+    if (failedJobs.length === 0) return;
+
+    // Build mapping from job name to job data and URLs
+    const jobsByKey = new Map();
+    const urlToJobKey = new Map();
+    const allUrls = [];
+
+    // Find all job elements and build mappings
+    const jobElements = Array.from(list.querySelectorAll('.job-item'));
+
     failedJobs.forEach(job => {
-        if (job.urls && job.urls.length > 0) {
-            // Push ALL URLs to check if any are cached as permafail
-            jobUrls.push(...job.urls);
-        }
+        // Find the corresponding DOM element for this job
+        const jobElement = jobElements.find(el => el.dataset.jobName === job.name);
+        if (!jobElement) return;
+
+        const { owner, repo, pr, jobName } = jobElement.dataset;
+        const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
+        const urls = job.urls || [];
+
+        jobsByKey.set(jobKey, {
+            jobElement,
+            urls,
+            resultsByUrl: new Map()
+        });
+
+        urls.forEach(url => {
+            urlToJobKey.set(url, jobKey);
+            allUrls.push(url);
+        });
     });
 
-    if (jobUrls.length === 0) return;
+    if (allUrls.length === 0) return;
 
     try {
         // Fetch cached results from database
-        const response = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify(jobUrls))}`);
+        const response = await fetch(`/api/jobs/status?job_urls=${encodeURIComponent(JSON.stringify(allUrls))}`);
         if (!response.ok) {
             console.error('Failed to load cached permafail results:', response.status);
             return;
@@ -1279,25 +1326,67 @@ async function loadCachedPermafailResults(list, failedJobs) {
 
         const status = await response.json();
 
-        // Apply cached results to UI
+        // Map results back to jobs
         for (const [url, result] of Object.entries(status)) {
-            if (result.permafail && !result.override) {
-                const jobElement = list.querySelector(`[data-job-url="${url}"]`);
-                if (jobElement) {
-                    const owner = jobElement.dataset.owner;
-                    const repo = jobElement.dataset.repo;
-                    const pr = jobElement.dataset.pr;
-                    const jobName = jobElement.dataset.jobName;
-                    const jobKey = `${owner}/${repo}/${pr}/${jobName}`;
+            const jobKey = urlToJobKey.get(url);
+            if (!jobKey) continue;
 
-                    renderPermafailIcon(jobElement, result.reason, result);
-                    setPermafailJobState(jobKey, result, [url]);
+            const jobData = jobsByKey.get(jobKey);
+            if (!jobData) continue;
 
-                    // Disable "Check for Permafail" button since we have a cached permafail
-                    const checkBtn = jobElement.querySelector('.check-permafail-btn');
-                    if (checkBtn) {
-                        checkBtn.disabled = true;
-                        checkBtn.textContent = 'Permafail (cached)';
+            jobData.resultsByUrl.set(url, result);
+        }
+
+        // Apply results to UI for each job
+        for (const [jobKey, jobData] of jobsByKey.entries()) {
+            const { jobElement, urls, resultsByUrl } = jobData;
+
+            // Categorize results
+            const permafailUrls = [];
+            const nonPermafailUrls = [];
+
+            for (const url of urls) {
+                const result = resultsByUrl.get(url);
+                if (!result) continue;
+
+                // Override means cleared - don't show as permafail or non-permafail cached
+                if (result.override) continue;
+
+                if (result.permafail) {
+                    permafailUrls.push({ url, result });
+                } else {
+                    nonPermafailUrls.push({ url, result });
+                }
+            }
+
+            // Permafail takes precedence - if ANY URL is permafail (not overridden), show permafail
+            if (permafailUrls.length > 0) {
+                const first = permafailUrls[0];
+                renderPermafailIcon(jobElement, first.result.reason, first.result);
+                setPermafailJobState(jobKey, first.result, permafailUrls.map(p => p.url));
+
+                const checkBtn = jobElement.querySelector('.check-permafail-btn');
+                if (checkBtn) {
+                    checkBtn.style.display = 'none';
+                }
+            }
+            // All URLs must have non-overridden non-permafail cached results - show analyzed badge
+            else {
+                const allNonOverriddenNonPermafail = urls.every(url => {
+                    const result = resultsByUrl.get(url);
+                    return result && !result.override && !result.permafail;
+                });
+
+                if (urls.length > 0 && allNonOverriddenNonPermafail) {
+                    const first = nonPermafailUrls[0];
+                    if (first) {
+                        renderNonPermafailInfo(jobElement, first.result.reason, first.result);
+                        setPermafailJobState(jobKey, first.result, urls);
+
+                        const checkBtn = jobElement.querySelector('.check-permafail-btn');
+                        if (checkBtn) {
+                            checkBtn.style.display = 'none';
+                        }
                     }
                 }
             }
@@ -2019,11 +2108,7 @@ async function manualPermafailCheck(jobElement, buttonElement) {
                 const cachedResult = statusData[jobUrls[0]];
                 setPermafailJobState(jobKey, cachedResult, jobUrls);
                 renderNonPermafailInfo(jobElement, cachedResult.reason, cachedResult);
-                buttonElement.textContent = 'No permafail (cached)';
-                setTimeout(() => {
-                    buttonElement.textContent = 'Check for Permafail';
-                    buttonElement.disabled = false;
-                }, 2000);
+                buttonElement.style.display = 'none';
                 showToast('No permafail detected (cached result)', 'success');
                 return;
             }
@@ -2059,11 +2144,7 @@ async function manualPermafailCheck(jobElement, buttonElement) {
             // No permafail detected - store result and show info icon
             setPermafailJobState(jobKey, result, jobUrls.slice(0, 10));
             renderNonPermafailInfo(jobElement, result.reason, result);
-            buttonElement.textContent = 'No permafail detected';
-            setTimeout(() => {
-                buttonElement.textContent = 'Check for Permafail';
-                buttonElement.disabled = false;
-            }, 2000);
+            buttonElement.style.display = 'none';
             showToast('No permafail detected - safe to retest', 'success');
         }
     } catch (error) {

@@ -74,7 +74,7 @@ def normalize_permafail_result(permafail_result):
             parts.append(f"Type: {failure_type}")
 
         # Include common tests or signature
-        common_tests = normalized.get("all_common_tests")
+        common_tests = normalized.get("permafail_tests") or normalized.get("all_common_tests")
         if common_tests and isinstance(common_tests, list) and len(common_tests) > 0:
             parts.append(f"Common test(s): {', '.join(common_tests[:3])}")
         elif "common_signature" in normalized:

@@ -273,6 +273,40 @@ h1 {
     transform: scale(1.1);
 }
 
+/* Analysis info badge for non-permafail results */
+.analysis-info-icon {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 2px 8px;
+    background: #e8f5e9;
+    border: 1px solid var(--success);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s, transform 0.2s;
+}
+
+.analysis-info-icon:hover,
+.analysis-info-icon:focus {
+    background: #c8e6c9;
+    transform: scale(1.05);
+    outline: 2px solid var(--success);
+    outline-offset: 2px;
+}
+
+.analysis-checkmark {
+    color: var(--success);
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+.analysis-label {
+    color: #2e7d32;
+    font-weight: 500;
+    font-size: 12px;
+}
+
 /* Permafail modal dialog */
 .permafail-modal {
     display: none;
