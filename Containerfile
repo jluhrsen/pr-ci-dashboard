@@ -4,7 +4,7 @@
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.22
 
 # Install system dependencies
-# python3.11: Runtime for Flask app
+# python3.11: Runtime for Flask app and ai-helpers classify-job-failures.py script
 # jq: Required by the job-status/retest bash scripts (scripts/*.sh)
 # curl is NOT installed: the base image's curl-minimal already provides
 # /usr/bin/curl and full curl conflicts with it on UBI 9
@@ -13,6 +13,12 @@ RUN dnf install -y \
     python3.11-pip \
     jq \
     && dnf clean all
+
+# Set python3.11 as the default python3 for ai-helpers scripts
+# The base image has python3.9 as default, but ai-helpers classify-job-failures.py
+# uses Python 3.10+ syntax (str | None, list[str]) which fails on 3.9
+RUN alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
+    alternatives --set python3 /usr/bin/python3.11
 
 # Install GitHub CLI from the official gh-cli RPM repository
 # gh is not available in UBI/RHEL repos (only via ART repos inside CI build pods)
