@@ -2125,12 +2125,13 @@ async function manualPermafailCheck(jobElement, buttonElement) {
 
         // Check for analysis error
         if (result.error) {
-            showToast(`Analysis failed: ${result.reason}`, 'error');
+            const errorMsg = result.error || result.reason || 'Unknown error';
+            showToast(`Analysis failed for ${jobName}: ${errorMsg}`, 'error', 10000);
             buttonElement.textContent = 'Analysis failed';
             setTimeout(() => {
                 buttonElement.textContent = 'Check for Permafail';
                 buttonElement.disabled = false;
-            }, 2000);
+            }, 3000);
             return; // Fail open - don't set permafail
         }
 
@@ -2341,10 +2342,22 @@ function showCardError(cardElement, message) {
 }
 
 // Terminal Modal Functions
-function showTerminalModal() {
+function showTerminalModal(jobName = '') {
     const modal = document.getElementById('terminalModal');
     const body = document.getElementById('terminalBody');
+    const header = modal.querySelector('.terminal-header span');
+
     body.innerHTML = ''; // Clear previous content
+
+    // Update header with job name if provided
+    if (header) {
+        if (jobName) {
+            header.textContent = `Analysis: ${jobName}`;
+        } else {
+            header.textContent = 'Claude CLI Analysis';
+        }
+    }
+
     modal.style.display = 'flex';
 }
 
@@ -2366,8 +2379,8 @@ function appendTerminalLine(text) {
 // SSE Streaming Analysis
 async function analyzeWithStreaming(pr, repo, jobName, jobUrls) {
     return new Promise((resolve, reject) => {
-        // Show terminal modal
-        showTerminalModal();
+        // Show terminal modal with job context
+        showTerminalModal(jobName);
 
         let terminalOutput = ''; // Capture all terminal output
 
