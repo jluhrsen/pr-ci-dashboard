@@ -6,7 +6,7 @@ import tempfile
 
 # Overall deadline for a single permafail analysis (both streaming and
 # non-streaming paths)
-ANALYSIS_TIMEOUT_SECONDS = 300
+ANALYSIS_TIMEOUT_SECONDS = 600
 
 
 def build_claude_env(google_adc=None):
