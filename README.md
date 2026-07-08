@@ -290,9 +290,11 @@ Setup (one time):
 1. Create your own GCP project (console.cloud.google.com/projectcreate)
 2. OAuth consent screen: External audience; add each user's @redhat.com
    address under **Test users** (this is the access list while unverified)
-3. Credentials → Create OAuth client ID → **Web application** with authorized
-   redirect URI `http://localhost:5000/api/google/oauth/callback` (everyone
-   accesses via their own localhost port-forward, so one URI serves all users)
+3. Credentials → Create OAuth client ID → **Web application** with BOTH of
+   these authorized redirect URIs (Google requires an exact string match and
+   `localhost` ≠ `127.0.0.1`; rootless podman users browse via 127.0.0.1):
+   `http://localhost:5000/api/google/oauth/callback` and
+   `http://127.0.0.1:5000/api/google/oauth/callback`
 4. `oc create secret generic google-oauth --from-literal=GOOGLE_OAUTH_CLIENT_ID=... --from-literal=GOOGLE_OAUTH_CLIENT_SECRET=...`
 5. `oc set env deploy/pr-ci-dashboard --from=secret/google-oauth`
 
