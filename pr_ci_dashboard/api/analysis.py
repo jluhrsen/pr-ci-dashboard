@@ -183,44 +183,45 @@ def analyze_job_stream():
             """Generator function for SSE stream"""
             final_result = None
 
-            # Stream analysis output (as the signed-in Google user when available)
-            for event_json in analyze_permafail_streaming(
-                data["job_urls"],
-                data["job_name"],
-                data["pr"],
-                google_adc=google_adc
-            ):
-                event = json.loads(event_json)
+            try:
+                # Stream analysis output (as the signed-in Google user when available)
+                for event_json in analyze_permafail_streaming(
+                    data["job_urls"],
+                    data["job_name"],
+                    data["pr"],
+                    google_adc=google_adc
+                ):
+                    event = json.loads(event_json)
 
-                if event["type"] == "result":
-                    final_result = normalize_permafail_result(event["data"])
-                    event["data"] = final_result
-                    event_json = json.dumps(event)
+                    if event["type"] == "result":
+                        final_result = normalize_permafail_result(event["data"])
+                        event["data"] = final_result
+                        event_json = json.dumps(event)
 
-                # Send as SSE event
-                yield f"data: {event_json}\n\n"
+                    # Send as SSE event
+                    yield f"data: {event_json}\n\n"
+            finally:
+                # Cache results even if client disconnects (runs in finally block)
+                if final_result and "error" not in final_result:
+                    for i, url in enumerate(data["job_urls"]):
+                        signature = final_result.get("signatures", [])[i] if i < len(final_result.get("signatures", [])) else {}
+                        store_analysis(
+                            job_url=url,
+                            pr_number=pr_number,
+                            repo=data["repo"],
+                            job_name=data["job_name"],
+                            signature=signature,
+                            permafail_result=final_result,
+                            db_path=db_path
+                        )
 
-            # Cache results if we got a final result (but skip errors)
-            if final_result and "error" not in final_result:
-                for i, url in enumerate(data["job_urls"]):
-                    signature = final_result.get("signatures", [])[i] if i < len(final_result.get("signatures", [])) else {}
-                    store_analysis(
-                        job_url=url,
-                        pr_number=pr_number,
-                        repo=data["repo"],
-                        job_name=data["job_name"],
-                        signature=signature,
-                        permafail_result=final_result,
-                        db_path=db_path
-                    )
-
-            # Audit with the actor resolved back in request context
-            if final_result is not None:
-                record_audit(actor, 'analyze-stream',
-                             f"{data['pr']} {data['job_name']}",
-                             f"error: {final_result['error']}" if 'error' in final_result
-                             else f"permafail={final_result.get('permafail')}",
-                             db_path=db_path)
+                # Audit with the actor resolved back in request context
+                if final_result is not None:
+                    record_audit(actor, 'analyze-stream',
+                                 f"{data['pr']} {data['job_name']}",
+                                 f"error: {final_result['error']}" if 'error' in final_result
+                                 else f"permafail={final_result.get('permafail')}",
+                                 db_path=db_path)
 
         return Response(generate(), mimetype='text/event-stream')
 
