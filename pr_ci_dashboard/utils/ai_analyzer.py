@@ -232,7 +232,8 @@ Return ONLY the final JSON result with no additional explanation."""
             pass
 
         # If that fails, try to find JSON object in output
-        json_start = full_output.rfind('{')
+        # Look for FIRST '{' not last - the top-level result object comes first
+        json_start = full_output.find('{')
         if json_start == -1:
             yield json.dumps({
                 "type": "result",
@@ -249,6 +250,28 @@ Return ONLY the final JSON result with no additional explanation."""
             result = json.loads(json_str)
             yield json.dumps({"type": "result", "data": result})
         except json.JSONDecodeError as e:
+            # JSON parsing failed - try to extract just the JSON object by finding matching braces
+            # The skill sometimes outputs extra text after the JSON
+            brace_count = 0
+            json_end = -1
+            for i, char in enumerate(json_str):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+
+            if json_end > 0:
+                try:
+                    result = json.loads(json_str[:json_end])
+                    yield json.dumps({"type": "result", "data": result})
+                    return
+                except json.JSONDecodeError:
+                    pass
+
+            # Still failed - return error
             yield json.dumps({
                 "type": "result",
                 "data": {
