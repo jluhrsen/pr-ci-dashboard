@@ -225,7 +225,8 @@ def test_retest_org_blocked_user_token_falls_back_to_bot(client, bot_env, monkey
                           "credentials, the `openshift` organization has enabled OAuth App "
                           "access restrictions... (addComment)"}
 
-    def fake_retest(owner, repo, pr, jobs, job_type, token=None):
+    def fake_retest(owner, repo, pr, jobs, job_type, token=None,
+                    requested_by=None, auto=False):
         return {"success": True} if token == 'ghs_bot_tok' else org_error
 
     with patch.object(github_app, 'get_bot_token', return_value='ghs_bot_tok'), \

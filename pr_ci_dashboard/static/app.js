@@ -809,7 +809,7 @@ async function checkJobStatesForAutoRetest(prKey) {
             }
 
             console.log(`Auto-retesting ${job.name} (attempt ${count})`);
-            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true, true);
 
             // Mark cooldown and show toast only after successful retest
             if (retestResult === true) {
@@ -975,7 +975,7 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
         if (jobUrls.length < 2) {
             console.warn(`Not enough job URLs for permafail check on ${job.name}`);
             // Retest anyway if we can't check (skip tracking since this is auto-retest)
-            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true, true);
             if (retestResult !== false) {
                 autoRetestCooldown.set(jobKey, now);
             }
@@ -1040,7 +1040,7 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
         } else {
             // Not a permafail - proceed with retest (skip tracking since this is auto-retest)
             console.log(`No permafail detected on ${job.name}, retesting...`);
-            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true, true);
 
             // Mark cooldown and show toast only after successful retest
             if (retestResult === true) {
@@ -1051,7 +1051,7 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
     } catch (error) {
         console.error('Error checking permafail:', error);
         // On error, allow retest (fail open, skip tracking since this is auto-retest)
-        const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true);
+        const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true, true);
         if (retestResult === true) {
             autoRetestCooldown.set(jobKey, now);
         }
@@ -2080,13 +2080,13 @@ async function manualPermafailCheck(jobElement, buttonElement) {
 // ========================================
 // Retest Logic
 // ========================================
-async function retestJob(owner, repo, pr, jobs, type, skipTracking = false) {
+async function retestJob(owner, repo, pr, jobs, type, skipTracking = false, auto = false) {
     try {
         const response = await fetch('/api/retest', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             // pr arrives as a string from prKey.split('/') at most call sites
-            body: JSON.stringify({ owner, repo, pr: Number(pr), jobs, type })
+            body: JSON.stringify({ owner, repo, pr: Number(pr), jobs, type, auto })
         });
 
         const result = await response.json();

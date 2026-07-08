@@ -288,7 +288,13 @@ def api_retest():
     github = get_session_github()
     token = github['token'] if github else github_app.get_bot_token()
 
-    result = retest_jobs(owner, repo, pr, jobs, job_type, token=token)
+    # Attribute the human in the comment when the posting identity isn't
+    # them (bot / shared token); a user posting as themselves needs no line
+    requested_by = None if github else current_actor()
+    auto = bool(data.get('auto'))
+
+    result = retest_jobs(owner, repo, pr, jobs, job_type, token=token,
+                         requested_by=requested_by, auto=auto)
 
     # A connected user's OAuth token can be blocked by org policy (OAuth App
     # access restrictions) even though the bot's installation token works.
@@ -299,7 +305,9 @@ def api_retest():
             and github is not None):
         bot_token = github_app.get_bot_token()
         if bot_token:
-            result = retest_jobs(owner, repo, pr, jobs, job_type, token=bot_token)
+            # The bot posts on the user's behalf now - attribute them
+            result = retest_jobs(owner, repo, pr, jobs, job_type, token=bot_token,
+                                 requested_by=current_actor(), auto=auto)
             used_bot_fallback = True
 
     outcome = 'success' if result.get('success') else f"error: {result.get('error')}"
