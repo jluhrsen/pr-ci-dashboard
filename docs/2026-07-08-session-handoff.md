@@ -44,6 +44,23 @@ the database.
   analysis run was still being tested — confirm its outcome first.
 - Test suite green (216); frontend checked with `node --check`.
 
+## Local run quick reference (known-good, full args)
+
+```bash
+# one-time: bot key from your team's secret manager -> podman secret
+podman secret create fb-github-app-key ~/.config/fb-bot-key.pem
+# one-time: env file (two required values)
+printf 'GOOGLE_OAUTH_CLIENT_SECRET=<secret-from-your-team>\nANTHROPIC_VERTEX_PROJECT_ID=<your-vertex-project>\n' > ~/.config/fb.env && chmod 600 ~/.config/fb.env
+# run (any host port; container side is always 5000)
+podman run -d --name flake-buster -p 127.0.0.1:8181:5000 --env-file ~/.config/fb.env -v fb-data:/data --secret source=fb-github-app-key,type=mount,target=/secrets/github-app/private-key.pem,uid=1001,gid=0,mode=0400 quay.io/jluhrsen/pr-ci-dashboard:latest
+```
+
+Browse http://127.0.0.1:8181 (always 127.0.0.1, never localhost - rootless
+podman publishes IPv4 only). The Google OAuth client's authorized redirect
+URIs must exactly match the browsed host:port + `/api/google/oauth/callback`.
+Update flow: `podman rm -f flake-buster` + re-run (fb-data volume keeps the
+database); rebuild or pull the image first as appropriate.
+
 ## Conventions
 
 - Every change gets an independent review pass before it lands; review
