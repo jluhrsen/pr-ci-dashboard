@@ -79,9 +79,13 @@ ENV ANTHROPIC_MODEL=claude-opus-4-6
 # Runtime mount: /data PVC for persistence
 ENV PR_CI_DASHBOARD_DB=/data/dashboard.db
 
-# Team OAuth app configuration (public identifiers, not secrets - the
-# GitHub device flow needs no secret at all, and the Google client SECRET
-# must still be supplied at runtime: -e GOOGLE_OAUTH_CLIENT_SECRET=...)
+# Team OAuth app configuration. Everything baked below is a PUBLIC
+# identifier by design (OAuth client IDs are visible in browser traffic
+# for any web app; the GitHub App ID appears in the public
+# openshift/release repo). NO secret of any kind is baked into this
+# image: the Google client SECRET is supplied at runtime
+# (-e GOOGLE_OAUTH_CLIENT_SECRET=...) and the GitHub App PRIVATE KEY is
+# mounted at runtime (podman/k8s secret).
 # With these baked in, users log in as themselves and no personal
 # credentials (GH_TOKEN, ADC files) are ever mounted into the container.
 # Override with -e VAR=... (e.g. DASHBOARD_REQUIRE_GITHUB=0) if needed.
