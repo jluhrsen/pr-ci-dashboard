@@ -725,9 +725,20 @@ async function checkJobStatesForAutoRetest(prKey) {
             const jobName = cachedKey.split('/').slice(3).join('/'); // Everything after owner/repo/number
 
             // If job was pending/failure and now disappeared AND not running, mark as success
+            // BUT: Don't mark as success if it was recently retested (within 15 minutes) -
+            // it might temporarily disappear while Prow processes the retest command
             if ((cachedState === 'pending' || cachedState === 'failure') &&
                 !currentJobNames.has(jobName) &&
                 !runningJobNames.has(jobName)) {
+
+                // Check if this job was recently retested
+                const lastRetestTime = autoRetestCooldown.get(cachedKey);
+                const fifteenMinutes = 15 * 60 * 1000;
+                if (lastRetestTime && (Date.now() - lastRetestTime) < fifteenMinutes) {
+                    console.log(`Job ${jobName} disappeared but was recently retested - keeping in cache as ${cachedState}`);
+                    continue;
+                }
+
                 jobStateCache.set(cachedKey, 'success');
                 // Reset failure counter when job succeeds
                 jobFailureCounters.delete(cachedKey);
@@ -746,7 +757,7 @@ async function checkJobStatesForAutoRetest(prKey) {
 
             // Handle already-failed jobs on first poll (previousState === undefined)
             if (previousState === undefined && currentState === 'failure') {
-                const consecutiveFailures = job.urls?.length || 1;
+                const consecutiveFailures = job.consecutive || job.urls?.length || 1;
                 jobFailureCounters.set(jobKey, consecutiveFailures);
 
                 if (consecutiveFailures <= MAX_AUTO_RETEST_FAILURES) {
