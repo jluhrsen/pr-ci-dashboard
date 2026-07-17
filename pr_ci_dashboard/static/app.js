@@ -755,16 +755,12 @@ async function checkJobStatesForAutoRetest(prKey) {
             const currentState = job.state;
             const previousState = jobStateCache.get(jobKey);
 
-            // Handle already-failed jobs on first poll (previousState === undefined)
+            // First poll after reload: seed caches only, don't trigger retests.
+            // Retesting on first sight would cause duplicate retests every
+            // time the page is reloaded while failed jobs exist.
             if (previousState === undefined && currentState === 'failure') {
                 const consecutiveFailures = job.consecutive || job.urls?.length || 1;
                 jobFailureCounters.set(jobKey, consecutiveFailures);
-
-                if (consecutiveFailures <= MAX_AUTO_RETEST_FAILURES) {
-                    jobsToRetestImmediately.push({ job, count: consecutiveFailures });
-                } else if (consecutiveFailures >= PERMAFAIL_CHECK_THRESHOLD) {
-                    jobsNeedingPermafailCheck.push({ job, count: consecutiveFailures });
-                }
             }
             // Detect state transitions that result in failure
             else if ((previousState === 'pending' || previousState === 'success') && currentState === 'failure') {
