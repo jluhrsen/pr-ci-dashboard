@@ -1042,11 +1042,8 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
 
         if (result.permafail) {
             // Mark job as permafail (don't disable auto-retest for entire PR yet)
-            setPermafailJobState(jobKey, {
-                permafail: true,
-                reason: result.reason,
-                override: false
-            }, jobUrls);
+            result.override = false;
+            setPermafailJobState(jobKey, result, jobUrls);
 
             // Clear failure counter when job is marked permafail
             jobFailureCounters.delete(jobKey);
