@@ -794,6 +794,16 @@ async function checkJobStatesForAutoRetest(prKey) {
         for (const { job, count } of jobsToRetestImmediately) {
             const jobKey = `${prKey}/${job.name}`;
 
+            // Hard guard: if the script reports high consecutive failures,
+            // route through permafail analysis instead of retesting immediately
+            const scriptConsecutive = job.consecutive || job.urls?.length || 0;
+            if (scriptConsecutive >= PERMAFAIL_CHECK_THRESHOLD) {
+                console.log(`Routing ${job.name} to permafail check - script reports ${scriptConsecutive} consecutive failures`);
+                jobsNeedingPermafailCheck.push({ job, count: scriptConsecutive });
+                jobFailureCounters.set(jobKey, scriptConsecutive);
+                continue;
+            }
+
             // Skip if already marked as permafail
             const permafailStatus = permafailJobs.get(jobKey);
             if (permafailStatus && permafailStatus.permafail && !permafailStatus.override) {
