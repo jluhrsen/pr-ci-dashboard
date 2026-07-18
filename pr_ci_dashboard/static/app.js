@@ -764,7 +764,8 @@ async function checkJobStatesForAutoRetest(prKey) {
             }
             // Detect state transitions that result in failure
             else if ((previousState === 'pending' || previousState === 'success') && currentState === 'failure') {
-                const count = (jobFailureCounters.get(jobKey) || 0) + 1;
+                const scriptCount = job.consecutive || job.urls?.length || 0;
+                const count = Math.max((jobFailureCounters.get(jobKey) || 0) + 1, scriptCount);
                 jobFailureCounters.set(jobKey, count);
 
                 if (count <= MAX_AUTO_RETEST_FAILURES) {
