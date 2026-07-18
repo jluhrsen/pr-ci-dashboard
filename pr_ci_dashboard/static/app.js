@@ -977,8 +977,8 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
             return;
         }
 
-        // Get job URLs from the job object
-        const jobUrls = job.urls || [];
+        // Get job URLs from the job object (API accepts 2-10)
+        const jobUrls = (job.urls || []).slice(0, 10);
 
         if (jobUrls.length < 2) {
             console.warn(`Not enough job URLs for permafail check on ${job.name}`);
@@ -1058,10 +1058,14 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
         }
     } catch (error) {
         console.error('Error checking permafail:', error);
-        // On error, allow retest (fail open, skip tracking since this is auto-retest)
-        const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true, true);
-        if (retestResult === true) {
-            autoRetestCooldown.set(jobKey, now);
+        const failureCount = jobFailureCounters.get(jobKey) || 0;
+        if (failureCount <= PERMAFAIL_CHECK_THRESHOLD) {
+            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true, true);
+            if (retestResult === true) {
+                autoRetestCooldown.set(jobKey, now);
+            }
+        } else {
+            console.log(`Skipping fail-open retest for ${job.name} - ${failureCount} consecutive failures`);
         }
     }
 }
