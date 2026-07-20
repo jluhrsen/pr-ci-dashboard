@@ -1052,6 +1052,12 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
             result.override = false;
             setPermafailJobState(jobKey, result, jobUrls);
 
+            // Render the dumpster fire icon on the job element if visible
+            const jobElement = document.querySelector(`[data-job-name="${job.name}"]`);
+            if (jobElement) {
+                renderPermafailIcon(jobElement, result.reason, result);
+            }
+
             // Clear failure counter when job is marked permafail
             jobFailureCounters.delete(jobKey);
 
