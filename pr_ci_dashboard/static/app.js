@@ -1047,7 +1047,11 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
             result = await response.json();
         }
 
-        if (result.permafail) {
+        if (result.error) {
+            // Analysis failed (e.g. JSON parse error) — don't retest on inconclusive results
+            console.log(`Analysis error for ${job.name}: ${result.error} — skipping retest`);
+            showToast(`⚠️ Analysis inconclusive for ${job.name}: ${result.reason}`, 'error');
+        } else if (result.permafail) {
             // Mark job as permafail (don't disable auto-retest for entire PR yet)
             result.override = false;
             setPermafailJobState(jobKey, result, jobUrls);
