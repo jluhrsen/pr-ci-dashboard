@@ -413,9 +413,10 @@ Return ONLY the final JSON result with no additional explanation."""
         except json.JSONDecodeError:
             pass
 
-        # If that fails, try to find JSON object in output
-        # Look for the last occurrence of a complete JSON object
-        json_start = output.rfind('{')
+        # If that fails, find the first '{' and extract the complete
+        # top-level JSON object using brace matching (the AI often
+        # outputs reasoning text before and/or after the JSON).
+        json_start = output.find('{')
         if json_start == -1:
             error_msg = f"No JSON found in skill output. Output: {output[:200]}"
             print(f"[ERROR] {error_msg}")
@@ -430,8 +431,27 @@ Return ONLY the final JSON result with no additional explanation."""
             parsed_result = json.loads(json_str)
             print(f"[DEBUG] AI analysis for {job_name}: permafail={parsed_result.get('permafail')}, reason={parsed_result.get('reason', '')[:100]}")
             return parsed_result
-        except json.JSONDecodeError as e:
-            error_msg = f"Failed to parse JSON from output: {e}. Output snippet: {output[:200]}"
+        except json.JSONDecodeError:
+            brace_count = 0
+            json_end = -1
+            for i, char in enumerate(json_str):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+
+            if json_end > 0:
+                try:
+                    parsed_result = json.loads(json_str[:json_end])
+                    print(f"[DEBUG] AI analysis for {job_name} (brace-matched): permafail={parsed_result.get('permafail')}, reason={parsed_result.get('reason', '')[:100]}")
+                    return parsed_result
+                except json.JSONDecodeError:
+                    pass
+
+            error_msg = f"Failed to parse JSON from output: brace matching failed. Output snippet: {output[:200]}"
             print(f"[ERROR] {error_msg}")
             return {
                 "permafail": False,
