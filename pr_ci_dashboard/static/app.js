@@ -2240,10 +2240,11 @@ async function retestJob(owner, repo, pr, jobs, type, skipTracking = false, auto
     }
 }
 
-function retestAllJobs(owner, repo, pr, type, event) {
-    if (event?.target) {
-        event.target.disabled = true;
-        event.target.textContent = '⏳ Retesting all...';
+async function retestAllJobs(owner, repo, pr, type, event) {
+    const retestAllBtn = event?.target;
+    if (retestAllBtn) {
+        retestAllBtn.disabled = true;
+        retestAllBtn.textContent = '⏳ Retesting all...';
     }
 
     const card = document.getElementById(`pr-${owner}-${repo}-${pr}`);
@@ -2251,14 +2252,27 @@ function retestAllJobs(owner, repo, pr, type, event) {
     const jobs = extractJobNames(section);
 
     // Disable all individual retest buttons
-    section.querySelectorAll('.job-item button.btn:not(.btn-secondary)').forEach(btn => {
+    const individualBtns = section.querySelectorAll('.job-item button.btn:not(.btn-secondary)');
+    individualBtns.forEach(btn => {
         if (!btn.disabled) {
             btn.textContent = '⏳ Retesting...';
             btn.disabled = true;
         }
     });
 
-    retestJob(owner, repo, pr, jobs, type);
+    const result = await retestJob(owner, repo, pr, jobs, type);
+
+    if (result === false) {
+        // Re-enable buttons on failure
+        if (retestAllBtn) {
+            retestAllBtn.disabled = false;
+            retestAllBtn.textContent = `Retest All ${type === 'e2e' ? 'E2E' : 'Payload'}`;
+        }
+        individualBtns.forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = 'Retest';
+        });
+    }
 }
 
 function trackRetestedJobs(owner, repo, pr, jobs) {
