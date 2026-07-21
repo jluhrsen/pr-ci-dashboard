@@ -769,6 +769,15 @@ async function checkJobStatesForAutoRetest(prKey) {
                     jobsNeedingPermafailCheck.push({ job, count: consecutiveFailures });
                 }
             }
+            // Still failed: re-queue for permafail check if not yet marked
+            // (handles retry after a previous analysis error)
+            else if (previousState === 'failure' && currentState === 'failure') {
+                const count = jobFailureCounters.get(jobKey) || 0;
+                const permafailStatus = permafailJobs.get(jobKey);
+                if (count >= PERMAFAIL_CHECK_THRESHOLD && (!permafailStatus || !permafailStatus.permafail)) {
+                    jobsNeedingPermafailCheck.push({ job, count });
+                }
+            }
             // Detect state transitions that result in failure
             else if ((previousState === 'pending' || previousState === 'success') && currentState === 'failure') {
                 const scriptCount = job.consecutive || job.urls?.length || 0;
