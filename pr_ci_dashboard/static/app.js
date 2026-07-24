@@ -769,12 +769,12 @@ async function checkJobStatesForAutoRetest(prKey) {
                     jobsNeedingPermafailCheck.push({ job, count: consecutiveFailures });
                 }
             }
-            // Still failed: re-queue for permafail check if not yet marked
+            // Still failed: re-queue for permafail check only if never analyzed
             // (handles retry after a previous analysis error)
             else if (previousState === 'failure' && currentState === 'failure') {
                 const count = jobFailureCounters.get(jobKey) || 0;
                 const permafailStatus = permafailJobs.get(jobKey);
-                if (count >= PERMAFAIL_CHECK_THRESHOLD && (!permafailStatus || !permafailStatus.permafail)) {
+                if (count >= PERMAFAIL_CHECK_THRESHOLD && !permafailStatus) {
                     jobsNeedingPermafailCheck.push({ job, count });
                 }
             }
@@ -791,9 +791,13 @@ async function checkJobStatesForAutoRetest(prKey) {
                 }
             }
 
-            // Update cache and clear failure counter if job succeeded
-            if (currentState === 'success') {
+            // Update cache and clear failure/permafail state if job is no longer failing
+            if (currentState === 'success' || currentState === 'pending') {
                 jobFailureCounters.delete(jobKey);
+                const pf = permafailJobs.get(jobKey);
+                if (pf && !pf.permafail) {
+                    permafailJobs.delete(jobKey);
+                }
             }
             jobStateCache.set(jobKey, currentState);
         }
