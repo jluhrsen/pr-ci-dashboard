@@ -1,292 +1,215 @@
-# Multi-User Deployment Solution for PR CI Dashboard
+# Multi-user deployment and authentication
 
-## Problem Statement
+This guide describes the multi-user features implemented in `main`. The
+checked-in Kubernetes manifests are not yet a turnkey install; see
+[issue #5](https://github.com/jluhrsen/pr-ci-dashboard/issues/5).
 
-The pr-ci-dashboard currently has user-specific dependencies that prevent easy multi-user deployment:
-1. `.claude/skills` symlink points to user-specific home directory
-2. Database stored in project directory (lost on cleanup)
-3. No checks for Claude CLI availability until runtime failure
-4. Multiple users running `curl | sh` would each need their own credentials
+## Supported topology
 
-## Solution: XDG Base Directory Pattern
+The current shared topology is one pod and one gunicorn worker:
 
-Follow the same pattern as `gh` CLI and other modern Unix tools - system-wide installation with per-user configuration and data.
-
-## File Structure
-
-```
-~/.config/pr-ci-dashboard/
-  └── config.json                  # User preferences (non-sensitive)
-
-~/.local/share/pr-ci-dashboard/
-  └── dashboard.db                 # User's analysis cache (persists across runs)
-
-/tmp/pr-ci-dashboard-$USER/        # Run location (cleaned on exit)
-  └── <cloned repo>
+```text
+browser sessions
+  ├─ signed Flask cookie -> in-memory GitHub token
+  ├─ signed Flask cookie -> in-memory Google ADC
+  └─ CSRF token
+          |
+          v
+one Flask/gunicorn process
+  ├─ gh / GitHub App calls
+  ├─ Claude subprocesses
+  └─ SQLite on a ReadWriteOnce volume
 ```
 
-## Implementation Tasks
+Do not scale beyond one process/replica. OAuth sessions and rate limits are
+in memory, and SQLite plus the browser-owned auto-retest design are not a
+multi-replica coordination mechanism.
 
-### Task 1: Update Database Location
+## Secret model
 
-**File: `server.py`**
+Public identifiers may be set in the image or deployment:
 
-```python
-from pathlib import Path
-import os
+- GitHub OAuth client ID;
+- Google OAuth client ID;
+- GitHub App ID;
+- OAuth hosted-domain restriction;
+- expected secret mount paths.
 
-# Add after imports:
-DATA_DIR = Path.home() / '.local' / 'share' / 'pr-ci-dashboard'
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / 'dashboard.db'
+Secrets must be provided only at runtime:
 
-# Update Flask config:
-app = Flask(__name__)
-app.config['DB_PATH'] = str(DB_PATH)
+- `GOOGLE_OAUTH_CLIENT_SECRET`;
+- GitHub App PEM private key;
+- optional service-account ADC or `GH_TOKEN`;
+- `DASHBOARD_SECRET_KEY` for stable signed cookies.
+
+The checked-in Containerfile bakes the maintainer's public client/App IDs and
+the `redhat.com` restriction. Build a differently configured image or override
+the environment for another organization.
+
+## GitHub identities
+
+### Per-user device flow
+
+Set `GITHUB_OAUTH_CLIENT_ID` to an OAuth App with Device Flow enabled. No client
+secret or callback URL is required.
+
+With `DASHBOARD_REQUIRE_GITHUB=1`, search, job discovery, and retest endpoints
+return 401 until the user connects. The access token is stored only in process
+memory and is removed on disconnect, idle expiry, or restart.
+
+The requested scope is `public_repo`. Private-repository support would require
+a different scope and an explicit security review.
+
+### GitHub App bot fallback
+
+Set:
+
+```text
+GITHUB_APP_ID=<public-app-id>
+GITHUB_APP_PRIVATE_KEY_FILE=/secrets/github-app/private-key.pem
+GITHUB_APP_ORG=openshift
 ```
 
-**File: `utils/db.py`**
+When the file exists, the server signs a short-lived JWT with `openssl`, finds
+the organization installation, and caches an installation token until five
+minutes before expiry.
 
-```python
-# Remove hardcoded DB_PATH
-# OLD:
-# DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'dashboard.db')
+A connected user's token still has priority. If organization OAuth policy
+blocks that token, retest can fall back to the App and add human attribution
+to the comment. When no user is connected, App-posted comments use the best
+available audit actor (Google email or `anonymous`).
 
-# NEW: Get from Flask config
-def get_db_path():
-    from flask import current_app
-    return current_app.config.get('DB_PATH')
+Keep the host PEM mode 0600 and mount it read-only. Never bake it into an image.
 
-# Update all function signatures to accept db_path parameter
-def store_analysis(..., db_path=None):
-    if db_path is None:
-        db_path = get_db_path()
-    # ... rest of function
+### Ambient fallback
+
+Without a connected user or configured App, subprocesses inherit ambient
+`GH_TOKEN`/`gh` authentication. This is suitable only for a trusted single-user
+process. The current server binds to all interfaces, so protect it with a
+firewall until
+[issue #8](https://github.com/jluhrsen/pr-ci-dashboard/issues/8) is fixed.
+
+## Google login for Vertex analysis
+
+Set:
+
+```text
+GOOGLE_OAUTH_CLIENT_ID=<web-client-id>
+GOOGLE_OAUTH_CLIENT_SECRET=<secret>
+GOOGLE_OAUTH_HOSTED_DOMAIN=redhat.com
+DASHBOARD_REQUIRE_LOGIN=1
 ```
 
-### Task 2: Fix Skills Dependency
+Create a Google OAuth web client and register the exact URL users browse:
 
-**Remove `.claude/skills` symlink entirely.**
-
-The ai-helpers plugin provides the ci-prow-navigation skill, so no local symlink is needed. Update code to rely on the plugin system.
-
-**File: `utils/ai_analyzer.py`**
-
-Update to invoke the command directly rather than reading skill files:
-
-```python
-def analyze_permafail(job_urls, job_name, pr_info):
-    """
-    Analyze job URLs for permafail using ci:detect-permafail command from ai-helpers plugin
-    
-    Prerequisites:
-    - Claude CLI must be installed
-    - ci@ai-helpers plugin must be installed
-    """
-    import subprocess
-    import json
-    
-    cmd = [
-        'claude',
-        '--allowedTools', 'Skill,WebFetch,Bash',
-        '--print'
-    ]
-    
-    prompt = f"""Use the /ci:detect-permafail command to analyze these jobs:
-
-Job URLs: {json.dumps(job_urls)}
-Job name: {job_name}
-PR: {pr_info}
-
-Return ONLY the final JSON result with no additional explanation."""
-    
-    try:
-        result = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            cwd=os.path.dirname(os.path.dirname(__file__))
-        )
-        
-        if result.returncode != 0:
-            return {
-                "permafail": False,
-                "error": f"Command execution failed: {result.stderr}",
-                "signatures": []
-            }
-        
-        output = result.stdout.strip()
-        # Parse JSON from output (existing logic)
-        ...
-        
-    except Exception as e:
-        return {
-            "permafail": False,
-            "error": f"Unexpected error: {e}",
-            "signatures": []
-        }
+```text
+http://127.0.0.1:5000/api/google/oauth/callback
 ```
 
-### Task 3: Enhanced run.sh Checks
+Host, port, scheme, and `localhost` versus `127.0.0.1` must match exactly.
+Register every supported access URL. Use HTTPS and
+`DASHBOARD_SECURE_COOKIES=1` for any routed shared deployment.
 
-**File: `run.sh`**
+The flow uses authorization code + PKCE and requests OpenID email plus
+`cloud-platform`. The server enforces issuer, audience, expiration, and the
+configured Workspace `hd` claim before creating a session.
 
-Add comprehensive checks before running:
+The refresh token remains in process memory. For each analysis, the server
+writes an authorized-user ADC file, passes its path only to the Claude
+subprocess, and deletes it afterward. Mount `/tmp` as a memory-backed volume.
+
+Without a connected Google session, Claude inherits pod-level credentials.
+Set `DASHBOARD_REQUIRE_LOGIN=1` when that fallback should not be available to
+anonymous users.
+
+## Application session settings
+
+- Set a long random `DASHBOARD_SECRET_KEY` in the deployment. A random key is
+  generated otherwise, invalidating cookies on every restart.
+- `DASHBOARD_SESSION_TTL_SECONDS` defaults to 28,800 seconds (eight hours).
+- Set `DASHBOARD_SECURE_COOKIES=1` only when the browser uses HTTPS.
+- Cookies are HttpOnly and SameSite=Lax.
+- State-changing API calls require a session-bound `X-CSRF-Token`.
+
+CSRF is defense against cross-site browser requests, not authorization. A
+direct client that can reach an ungated server can obtain its own token.
+
+## Example Podman shape
+
+Prepare an environment file containing only runtime values:
 
 ```bash
-#!/bin/bash
-set -e
-
-echo "🔍 Checking prerequisites..."
-
-# Check Python
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Error: python3 not found. Please install Python 3.8+"
-    exit 1
-fi
-
-# Check gh CLI
-if ! command -v gh &> /dev/null; then
-    echo "❌ Error: GitHub CLI (gh) not found."
-    echo "Install from: https://cli.github.com"
-    exit 1
-fi
-
-# Check gh auth
-if ! gh auth status &> /dev/null; then
-    echo "❌ Error: GitHub CLI not authenticated."
-    echo "Run: gh auth login"
-    exit 1
-fi
-echo "✅ GitHub CLI authenticated"
-
-# Check Claude CLI
-if ! command -v claude &> /dev/null; then
-    echo "❌ Error: Claude CLI not found."
-    echo "Install from: https://claude.ai/claude-code"
-    exit 1
-fi
-echo "✅ Claude CLI found"
-
-# Check ai-helpers plugin
-if ! claude plugin list 2>/dev/null | grep -q 'ci@ai-helpers'; then
-    echo "⚠️  Warning: ci@ai-helpers plugin not installed."
-    echo "Permafail detection will not work without it."
-    echo ""
-    echo "To install:"
-    echo "  claude plugin marketplace add openshift-eng/ai-helpers"
-    echo "  claude plugin install ci@ai-helpers"
-    echo ""
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-else
-    echo "✅ ai-helpers plugin installed"
-fi
-
-# Rest of existing run.sh logic...
+printf 'GOOGLE_OAUTH_CLIENT_SECRET=<secret>\nANTHROPIC_VERTEX_PROJECT_ID=<project>\nDASHBOARD_SECRET_KEY=<random-secret>\n' > ~/.config/fb.env
+chmod 600 ~/.config/fb.env
 ```
 
-### Task 4: User Configuration Support
+Optionally create the App key secret:
 
-**File: `~/.config/pr-ci-dashboard/config.json`** (optional, for future enhancements)
-
-```json
-{
-  "poll_interval_ms": 30000,
-  "auto_retest_threshold": 2,
-  "permafail_check_at": 3,
-  "theme": "default"
-}
+```bash
+podman secret create fb-github-app-key ~/.config/fb-bot-key.pem
 ```
 
-**File: `server.py`**
+Run:
 
-```python
-def load_user_config():
-    """Load user configuration from XDG config directory"""
-    config_dir = Path.home() / '.config' / 'pr-ci-dashboard'
-    config_file = config_dir / 'config.json'
-    
-    default_config = {
-        'poll_interval_ms': 30000,
-        'auto_retest_threshold': 2,
-        'permafail_check_at': 3
-    }
-    
-    if config_file.exists():
-        with open(config_file) as f:
-            user_config = json.load(f)
-            default_config.update(user_config)
-    
-    return default_config
-
-# Add endpoint to serve config to frontend:
-@app.route('/api/config')
-def get_config():
-    return jsonify(load_user_config())
+```bash
+podman run -d --name flake-buster \
+  -p 127.0.0.1:5000:5000 \
+  --env-file ~/.config/fb.env \
+  -v fb-data:/data \
+  --secret source=fb-github-app-key,type=mount,target=/secrets/github-app/private-key.pem,uid=1001,gid=0,mode=0400 \
+  quay.io/jluhrsen/pr-ci-dashboard:latest
 ```
 
-## Multi-User Scenarios
+Omit the `--secret` option if users must connect GitHub individually.
 
-### Scenario 1: Multiple Team Members, Separate Machines
-Each user runs `curl | sh` on their own machine:
-- ✅ Each has their own `~/.config/gh/` credentials
-- ✅ Each has their own `~/.claude/` credentials  
-- ✅ Each has their own `~/.local/share/pr-ci-dashboard/dashboard.db`
-- ✅ No conflicts, no shared state
+## Kubernetes/OpenShift requirements
 
-### Scenario 2: Multiple Team Members, Same Machine
-Each user runs on the same shared server:
-- ✅ Each has their own home directory with isolated config
-- ✅ Flask runs on different ports or in different terminals
-- ⚠️  Potential port conflicts (5000) - add port auto-selection
-- ⚠️  Shared GitHub API rate limits via same organization
+A productionized overlay should provide:
 
-### Scenario 3: Centralized Deployment (Future)
-For true multi-user server deployment with authentication:
-- Need Flask OAuth implementation
-- Session-based credential management
-- Per-user database partitioning
-- This is beyond current scope - document as future enhancement
+- one replica and one worker;
+- persistent `/data`;
+- memory-backed `/tmp`;
+- stable `DASHBOARD_SECRET_KEY`;
+- Google client secret and, optionally, App key as Secrets;
+- organization-specific Vertex project/model configuration;
+- HTTPS Route/Ingress plus secure cookies;
+- NetworkPolicy and an explicit ingress allowlist;
+- an image pinned by immutable tag or digest;
+- platform-appropriate PVC ownership (`fsGroup: 0` is not accepted by
+  OpenShift restricted SCC).
 
-## Testing Plan
+The App key and Google client secret should be independently rotatable.
+Restarting the pod after rotation clears all in-memory user sessions.
 
-1. **Test fresh install on clean VM:**
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/jluhrsen/pr-ci-dashboard/main/run.sh | sh
-   ```
-   Verify all prerequisite checks work
+## Operational limitations
 
-2. **Test with missing prerequisites:**
-   - Run without `gh auth login` - should error clearly
-   - Run without Claude CLI - should error clearly
-   - Run without ai-helpers plugin - should warn
+- Auto-retest state is shared, but each browser executes it independently.
+  Multiple tabs/users can post duplicates, and monitoring stops when browsers
+  close. See [issue #2](https://github.com/jluhrsen/pr-ci-dashboard/issues/2).
+- One process is a scalability and availability limit.
+- There is no role distinction: every authenticated user can retest, analyze,
+  change monitor state, override cached verdicts, and read the audit endpoint.
+- Rate limits are per in-memory session and can be bypassed by creating new
+  sessions.
+- OAuth tokens are intentionally lost at restart.
+- The repository does not include TLS, Route/Ingress, NetworkPolicy, backup,
+  or disaster-recovery resources.
 
-3. **Test database persistence:**
-   - Run dashboard, trigger permafail analysis
-   - Stop server (Ctrl+C)
-   - Run again - verify analysis cache persists in `~/.local/share/pr-ci-dashboard/dashboard.db`
+## Path to multiple replicas
 
-4. **Test multi-user on same machine:**
-   - User A runs dashboard on port 5000
-   - User B runs dashboard - should either use different port or show clear error
+Before adding replicas:
 
-## Future Enhancements
+1. Move OAuth sessions and distributed rate limits to a shared store.
+2. Replace or redesign SQLite for concurrent writers and migrations.
+3. Move auto-retest to a server-side coordinator with leases/idempotency.
+4. Add role-based authorization for mutations and audit access.
+5. Add shared caching/request coalescing for PR job discovery.
+6. Define database backup, retention, and secret-rotation procedures.
 
-- Port auto-selection if 5000 is busy
-- `~/.config/pr-ci-dashboard/config.json` for user preferences
-- Environment variable overrides (`DASHBOARD_PORT`, `DASHBOARD_DB_PATH`)
-- System-wide installation option (`/usr/local/bin/pr-ci-dashboard`)
-- Docker container with volume mounts for user config
+Relevant tracking issues:
 
-## Security Considerations
-
-- Database file in `~/.local/share/` has mode 0600 (user-only read/write)
-- No credentials stored by dashboard - relies on `gh` and `claude` CLI
-- Each user's credentials remain in their own `~/.config/` directories
-- No shared tokens, no shared secrets between users
+- [#2 — duplicate-safe server-side auto-retest](https://github.com/jluhrsen/pr-ci-dashboard/issues/2)
+- [#5 — deployable Kubernetes/OpenShift manifests](https://github.com/jluhrsen/pr-ci-dashboard/issues/5)
+- [#6 — bounded and cached polling](https://github.com/jluhrsen/pr-ci-dashboard/issues/6)
+- [#7 — reproducible production builds](https://github.com/jluhrsen/pr-ci-dashboard/issues/7)
+- [#8 — safe local bind defaults](https://github.com/jluhrsen/pr-ci-dashboard/issues/8)

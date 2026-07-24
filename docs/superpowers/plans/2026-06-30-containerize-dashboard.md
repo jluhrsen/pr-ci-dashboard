@@ -1,5 +1,9 @@
 # PR CI Dashboard Containerization - Phase 1 Implementation Plan
 
+> Historical implementation plan. Use the
+> [current README](../../../README.md) and
+> [deployment guide](../../multi-user-deployment.md) for operations.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Package the PR CI Dashboard as a pip-installable Python package and containerize it for deployment to Kubernetes/OpenShift.

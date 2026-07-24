@@ -1,5 +1,9 @@
 # Security Hardening Plan — Shared Cluster Deployment (Phase 2)
 
+> Historical implementation-plan snapshot. Consult the
+> [project README](../../README.md) and [current architecture](../design.md)
+> before relying on a completed checkbox.
+
 **Status:** Planned, not started. Phase 1 (single-user cluster, port-forward access,
 personal credentials as namespace secrets) is deployed and explicitly does NOT meet
 these requirements. This document is the checklist for making the dashboard safe to

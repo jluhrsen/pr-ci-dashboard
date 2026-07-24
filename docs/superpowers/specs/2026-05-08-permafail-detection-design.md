@@ -1,5 +1,9 @@
 # Permafail Detection & Auto-Retest Design
 
+> Historical design record. Use the
+> [current architecture](../../design.md) for implemented behavior and known
+> limitations.
+
 **Status:** Ready for Implementation
 **Date:** 2026-05-08 (Updated: 2026-05-12)
 **Goal:** Add intelligent permafail detection and automated retesting to Flake Buster dashboard

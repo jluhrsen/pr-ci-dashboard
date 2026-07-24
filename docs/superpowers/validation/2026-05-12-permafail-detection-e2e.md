@@ -1,5 +1,8 @@
 # Permafail Detection - Final E2E Validation
 
+> Historical validation record. Results apply to the dated implementation,
+> not necessarily the current `main` branch.
+
 **Date:** 2026-05-12
 **Task:** Task 19 - Final End-to-End Test
 **Status:** ✅ PASSED

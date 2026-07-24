@@ -1,5 +1,8 @@
 # PR Auto-Retest and Permafail Migration Design
 
+> Historical design record. Current browser-owned auto-retest limitations are
+> documented in the [current architecture](../../design.md).
+
 **Date:** 2026-06-01  
 **Stories:** CORENET-7148, CORENET-7149  
 **Author:** Claude Code

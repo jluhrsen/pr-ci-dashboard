@@ -1,5 +1,9 @@
 # Session Handoff — Flake Buster (PR CI Dashboard)
 
+> Historical snapshot from 2026-07-08. For current behavior and operations,
+> use the [README](../README.md), [architecture](design.md), and
+> [multi-user deployment guide](multi-user-deployment.md).
+
 Short continuation note for resuming development (2026-07-08). Fuller
 operational context lives with the maintainer outside this repository.
 

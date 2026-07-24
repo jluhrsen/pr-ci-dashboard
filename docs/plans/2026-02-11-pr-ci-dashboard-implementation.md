@@ -1,5 +1,9 @@
 # PR CI Dashboard Implementation Plan
 
+> Historical implementation plan. It does not describe the current runtime;
+> see the [project README](../../README.md) and
+> [current architecture](../design.md).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build a local web dashboard that shows OpenShift PR job failures with one-click retest functionality.

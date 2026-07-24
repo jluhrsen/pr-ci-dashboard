@@ -1,5 +1,9 @@
 # Permafail Detection & Auto-Retest Implementation Plan
 
+> Historical implementation plan. Use the
+> [current architecture](../../design.md) for implemented behavior and known
+> limitations.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add intelligent permafail detection and automated retesting to the PR CI Dashboard

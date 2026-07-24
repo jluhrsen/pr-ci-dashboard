@@ -4,6 +4,10 @@ date: 2026-06-30
 status: approved
 ---
 
+> Historical design record. Use the
+> [current deployment guide](../../multi-user-deployment.md) before operating
+> or deploying the application.
+
 # Containerized Deployment for PR CI Dashboard
 
 ## Overview
