@@ -4,6 +4,7 @@ from unittest.mock import patch, MagicMock
 from pr_ci_dashboard.server import app
 from pr_ci_dashboard.utils.job_executor import get_pr_state
 from pr_ci_dashboard.utils.db import init_db
+from pr_ci_dashboard.utils import rate_limit
 
 
 RETEST_BODY = {"owner": "openshift", "repo": "origin", "pr": 1,
@@ -17,8 +18,10 @@ def client(tmp_path):
     app.config['TESTING'] = True
     app.config['CSRF_ENABLED'] = False
     app.config['DB_PATH'] = str(db_path)
+    rate_limit.reset()
     with app.test_client() as client:
         yield client
+    rate_limit.reset()
 
 
 # ========== get_pr_state unit tests ==========
@@ -122,3 +125,42 @@ class TestRetestPrStateGuard:
              patch('pr_ci_dashboard.server.retest_jobs') as mock_retest:
             client.post('/api/retest', json=RETEST_BODY)
         mock_retest.assert_not_called()
+
+
+class TestPerJobCooldown:
+    def test_duplicate_retest_blocked(self, client):
+        """Second retest of the same job within 5 minutes is rejected."""
+        with patch('pr_ci_dashboard.server.get_pr_state',
+                   return_value={"state": "OPEN"}), \
+             patch('pr_ci_dashboard.server.retest_jobs',
+                   return_value={"success": True}):
+            r1 = client.post('/api/retest', json=RETEST_BODY)
+            r2 = client.post('/api/retest', json=RETEST_BODY)
+        assert r1.status_code == 200
+        assert r2.status_code == 429
+        assert "retested recently" in r2.get_json()["error"]
+
+    def test_different_jobs_not_blocked(self, client):
+        """Different jobs on the same PR are independent."""
+        body2 = {**RETEST_BODY, "jobs": ["e2e-gcp"]}
+        with patch('pr_ci_dashboard.server.get_pr_state',
+                   return_value={"state": "OPEN"}), \
+             patch('pr_ci_dashboard.server.retest_jobs',
+                   return_value={"success": True}):
+            r1 = client.post('/api/retest', json=RETEST_BODY)
+            r2 = client.post('/api/retest', json=body2)
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+
+    def test_partial_cooldown_filters_jobs(self, client):
+        """When some jobs are cooled and others are not, only fresh jobs post."""
+        with patch('pr_ci_dashboard.server.get_pr_state',
+                   return_value={"state": "OPEN"}), \
+             patch('pr_ci_dashboard.server.retest_jobs',
+                   return_value={"success": True}) as mock_retest:
+            client.post('/api/retest', json=RETEST_BODY)
+            multi = {**RETEST_BODY, "jobs": ["e2e-aws", "e2e-gcp"]}
+            r2 = client.post('/api/retest', json=multi)
+        assert r2.status_code == 200
+        second_call_jobs = mock_retest.call_args_list[-1][0][3]
+        assert second_call_jobs == ["e2e-gcp"]

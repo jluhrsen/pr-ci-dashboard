@@ -13,6 +13,9 @@ sys.path.insert(0, str(project_root))
 def mock_pr_state_open():
     """Mock get_pr_state to OPEN for tests that hit /api/retest past
     validation. Tests that need a different state patch it themselves."""
+    from pr_ci_dashboard.utils import rate_limit
+    rate_limit.reset()
     with patch('pr_ci_dashboard.server.get_pr_state',
                return_value={"state": "OPEN"}):
         yield
+    rate_limit.reset()

@@ -25,6 +25,9 @@ from .utils import rate_limit
 # Rate limit per session: (max events, window seconds). Retests post GitHub
 # comments. The analyze limit lives in api/analysis.py with its endpoints.
 RETEST_RATE = (10, 60)
+# Per-job cooldown: 1 retest per job per PR within 5 minutes, across all
+# sessions.  Prevents spam when multiple browsers poll the same PR.
+JOB_RETEST_COOLDOWN = (1, 300)
 from .api.search import search_prs
 from .api.jobs import get_pr_jobs
 from .api.retest import retest_jobs
@@ -292,6 +295,17 @@ def api_retest():
         return jsonify({"error": "Could not verify PR state; retest blocked"}), 502
     if state_val != "OPEN":
         return jsonify({"error": f"PR is {state_val.lower()}; retest blocked"}), 409
+
+    # Per-job cooldown: deduplicate across all browser sessions so
+    # multiple tabs/refreshes cannot spam the same job
+    cooled = [j for j in jobs
+              if not rate_limit.allow(f'job:{owner}/{repo}#{pr}/{j}',
+                                     *JOB_RETEST_COOLDOWN)]
+    if cooled:
+        jobs = [j for j in jobs if j not in cooled]
+        if not jobs:
+            return jsonify({"error": "All requested jobs were retested "
+                            "recently; try again in a few minutes"}), 429
 
     # Post as the connected GitHub user when available; else as the bot
     # (App key mounted); else ambient GH_TOKEN (Phase 1 behavior)

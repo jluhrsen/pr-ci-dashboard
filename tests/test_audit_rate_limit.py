@@ -118,9 +118,10 @@ def test_override_audited(client):
 
 def test_retest_rate_limited(client, mock_pr_state_open):
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}):
-        for _ in range(10):
-            assert client.post('/api/retest', json=RETEST_BODY).status_code == 200
-        response = client.post('/api/retest', json=RETEST_BODY)
+        for i in range(10):
+            body = {**RETEST_BODY, "jobs": [f"e2e-aws-{i}"]}
+            assert client.post('/api/retest', json=body).status_code == 200
+        response = client.post('/api/retest', json={**RETEST_BODY, "jobs": ["e2e-aws-10"]})
     assert response.status_code == 429
     assert 'Rate limit' in response.get_json()['error']
 
@@ -137,12 +138,12 @@ def test_analyze_rate_limited(client):
 def test_rate_limit_per_session(client, mock_pr_state_open):
     """A different browser session gets its own budget."""
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}):
-        for _ in range(10):
-            client.post('/api/retest', json=RETEST_BODY)
-        assert client.post('/api/retest', json=RETEST_BODY).status_code == 429
+        for i in range(10):
+            client.post('/api/retest', json={**RETEST_BODY, "jobs": [f"e2e-aws-{i}"]})
+        assert client.post('/api/retest', json={**RETEST_BODY, "jobs": ["e2e-aws-10"]}).status_code == 429
 
         with app.test_client() as other:
-            assert other.post('/api/retest', json=RETEST_BODY).status_code == 200
+            assert other.post('/api/retest', json={**RETEST_BODY, "jobs": ["e2e-aws-other"]}).status_code == 200
 
 
 def test_audit_endpoint_invalid_limit(client):
