@@ -129,7 +129,7 @@ def test_poll_terminal_error_clears_flow(client, monkeypatch):
 
 # ========== retest token pass-through ==========
 
-def test_retest_uses_session_token(client, monkeypatch):
+def test_retest_uses_session_token(client, monkeypatch, mock_pr_state_open):
     """When a session has a GitHub token, /api/retest posts with it."""
     monkeypatch.setenv('GITHUB_OAUTH_CLIENT_ID', 'cid')
 
@@ -150,7 +150,7 @@ def test_retest_uses_session_token(client, monkeypatch):
     assert mock_retest.call_args[1]['token'] == 'gho_user_tok'
 
 
-def test_retest_without_session_token(client):
+def test_retest_without_session_token(client, mock_pr_state_open):
     """Without a connected session, retest falls back to no token (pod GH_TOKEN)."""
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}) as mock_retest:
         client.post('/api/retest', json={
@@ -208,7 +208,7 @@ def test_expired_pending_flow_rejected(client, monkeypatch):
     assert PENDING_DEVICE_FLOWS == {}
 
 
-def test_expired_session_pruned(client, monkeypatch):
+def test_expired_session_pruned(client, monkeypatch, mock_pr_state_open):
     """An idle connected session past TTL is pruned: status disconnected, retest falls back."""
     monkeypatch.setenv('GITHUB_OAUTH_CLIENT_ID', 'cid')
     _connect_session(client)

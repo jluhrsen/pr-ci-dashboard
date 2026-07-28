@@ -28,6 +28,7 @@ RETEST_RATE = (10, 60)
 from .api.search import search_prs
 from .api.jobs import get_pr_jobs
 from .api.retest import retest_jobs
+from .utils.job_executor import get_pr_state
 from .api.analysis import analysis_bp
 
 app = Flask(__name__)
@@ -282,6 +283,15 @@ def api_retest():
     gate = _github_gate()
     if gate:
         return gate
+
+    # Block retesting merged/closed PRs
+    pr_state = get_pr_state(f"{owner}/{repo}", pr,
+                            token=_effective_github_token())
+    state_val = pr_state.get("state", "UNKNOWN")
+    if state_val == "UNKNOWN":
+        return jsonify({"error": "Could not verify PR state; retest blocked"}), 502
+    if state_val != "OPEN":
+        return jsonify({"error": f"PR is {state_val.lower()}; retest blocked"}), 409
 
     # Post as the connected GitHub user when available; else as the bot
     # (App key mounted); else ambient GH_TOKEN (Phase 1 behavior)

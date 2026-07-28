@@ -83,7 +83,7 @@ def test_get_audit_log_limit(tmp_path):
 
 # ========== endpoint integration ==========
 
-def test_retest_audited_anonymous(client):
+def test_retest_audited_anonymous(client, mock_pr_state_open):
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}):
         client.post('/api/retest', json=RETEST_BODY)
 
@@ -94,7 +94,7 @@ def test_retest_audited_anonymous(client):
     assert entries[0]['result'] == 'success'
 
 
-def test_retest_error_audited(client):
+def test_retest_error_audited(client, mock_pr_state_open):
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"error": "auth_failed"}):
         client.post('/api/retest', json=RETEST_BODY)
     entries = client.get('/api/audit').get_json()
@@ -116,7 +116,7 @@ def test_override_audited(client):
     assert entries[0]['action'] == 'override'
 
 
-def test_retest_rate_limited(client):
+def test_retest_rate_limited(client, mock_pr_state_open):
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}):
         for _ in range(10):
             assert client.post('/api/retest', json=RETEST_BODY).status_code == 200
@@ -134,7 +134,7 @@ def test_analyze_rate_limited(client):
     assert response.status_code == 429
 
 
-def test_rate_limit_per_session(client):
+def test_rate_limit_per_session(client, mock_pr_state_open):
     """A different browser session gets its own budget."""
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}):
         for _ in range(10):

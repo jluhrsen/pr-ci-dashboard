@@ -684,6 +684,17 @@ function stopPollingForPR(prKey) {
     }
 }
 
+function clearPRJobCaches(prKey) {
+    const prefix = `${prKey}/`;
+    for (const map of [jobStateCache, jobFailureCounters, autoRetestCooldown, permafailJobs]) {
+        for (const key of [...map.keys()]) {
+            if (key.startsWith(prefix)) {
+                map.delete(key);
+            }
+        }
+    }
+}
+
 async function checkJobStatesForAutoRetest(prKey) {
     const [owner, repo, number] = prKey.split('/');
 
@@ -695,6 +706,28 @@ async function checkJobStatesForAutoRetest(prKey) {
         }
 
         const data = await response.json();
+
+        // If the PR is not confirmed open, disable auto-retest and stop polling
+        const prState = data.pr?.state;
+        if (prState !== 'OPEN') {
+            autoRetestEnabled.set(prKey, false);
+            saveAutoRetestState(prKey);
+            stopPollingForPR(prKey);
+
+            const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
+            if (toggleElement) {
+                toggleElement.checked = false;
+            }
+
+            clearPRJobCaches(prKey);
+
+            const reason = (prState === 'CLOSED' || prState === 'MERGED')
+                ? `PR is ${prState.toLowerCase()}`
+                : 'PR state could not be verified';
+            showToast(`Auto-retest disabled for PR #${number} — ${reason}`, 'info');
+            console.log(`Disabled auto-retest for ${prKey} - ${reason}`);
+            return;
+        }
 
         // Extract jobs from both e2e and payload, combining failed and running arrays
         // Add state and type fields that the scripts don't provide

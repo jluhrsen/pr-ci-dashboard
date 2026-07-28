@@ -58,7 +58,7 @@ def test_comment_with_auto_attribution_payload():
 
 # ========== endpoint wiring ==========
 
-def test_bot_post_attributes_google_user(client, monkeypatch):
+def test_bot_post_attributes_google_user(client, monkeypatch, mock_pr_state_open):
     """Bot posts + Google-signed-in human -> attribution with their email."""
     from pr_ci_dashboard.utils.session_store import session_id
     with client.session_transaction() as sess:
@@ -77,7 +77,7 @@ def test_bot_post_attributes_google_user(client, monkeypatch):
     assert kwargs['auto'] is True
 
 
-def test_session_post_has_no_attribution(client, monkeypatch):
+def test_session_post_has_no_attribution(client, monkeypatch, mock_pr_state_open):
     """A user posting with their own connected token needs no attribution."""
     import time
     with client.session_transaction() as sess:
@@ -92,7 +92,7 @@ def test_session_post_has_no_attribution(client, monkeypatch):
     assert mock_retest.call_args[1]['requested_by'] is None
 
 
-def test_bot_fallback_retry_attributes(client, monkeypatch, tmp_path):
+def test_bot_fallback_retry_attributes(client, monkeypatch, tmp_path, mock_pr_state_open):
     """Org-blocked user token -> bot retry carries the attribution."""
     import time
     monkeypatch.setenv('GITHUB_APP_ID', '1460951')

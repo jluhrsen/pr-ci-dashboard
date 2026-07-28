@@ -150,7 +150,7 @@ def test_search_uses_bot_token_when_no_session(client, bot_env):
     assert mock_search.call_args[1]['token'] == 'ghs_bot_tok'
 
 
-def test_retest_uses_bot_token_when_no_session(client, bot_env):
+def test_retest_uses_bot_token_when_no_session(client, bot_env, mock_pr_state_open):
     with patch.object(github_app, 'get_bot_token', return_value='ghs_bot_tok'), \
          patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}) as mock_retest:
         client.post('/api/retest', json={
@@ -207,7 +207,7 @@ def test_status_reports_bot_inactive(client, monkeypatch):
     assert client.get('/api/github/oauth/status').get_json()['bot_active'] is False
 
 
-def test_retest_org_blocked_user_token_falls_back_to_bot(client, bot_env, monkeypatch):
+def test_retest_org_blocked_user_token_falls_back_to_bot(client, bot_env, monkeypatch, mock_pr_state_open):
     """A connected user's org-blocked token must not fail the retest when the
     bot can do it: retry as bot, audit the substitution."""
     monkeypatch.setenv('GITHUB_OAUTH_CLIENT_ID', 'cid')
@@ -244,7 +244,7 @@ def test_retest_org_blocked_user_token_falls_back_to_bot(client, bot_env, monkey
     assert audit[0]['result'] == 'success (as bot; user token org-blocked)'
 
 
-def test_retest_other_errors_not_retried(client, bot_env, monkeypatch):
+def test_retest_other_errors_not_retried(client, bot_env, monkeypatch, mock_pr_state_open):
     """Only the org-restriction error triggers the bot retry."""
     with patch.object(github_app, 'get_bot_token', return_value='ghs_bot_tok'), \
          patch('pr_ci_dashboard.server.retest_jobs',

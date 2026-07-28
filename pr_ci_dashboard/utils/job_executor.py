@@ -12,6 +12,33 @@ def _gh_env(token):
     return None
 
 
+def get_pr_state(repo: str, pr_number: int, token: str = None) -> dict:
+    """
+    Fetch the PR's lifecycle state from GitHub.
+
+    Returns:
+        {"state": "OPEN"|"CLOSED"|"MERGED"} on success,
+        {"state": "UNKNOWN"} on any failure (fail-closed).
+    """
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "view", str(pr_number),
+             "--repo", repo,
+             "--json", "state",
+             "--jq", ".state"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=_gh_env(token)
+        )
+        state = result.stdout.strip()
+        if result.returncode == 0 and state in ("OPEN", "CLOSED", "MERGED"):
+            return {"state": state}
+        return {"state": "UNKNOWN"}
+    except Exception:
+        return {"state": "UNKNOWN"}
+
+
 def get_e2e_jobs(repo: str, pr_number: int, token: str = None) -> dict:
     """
     Execute e2e-retest.sh with --json flag and parse output.

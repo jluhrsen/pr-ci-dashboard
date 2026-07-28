@@ -101,7 +101,7 @@ def test_retest_rejects_bad_fields(client):
         assert response.status_code == 400, f"should reject {body}"
 
 
-def test_retest_accepts_valid_fields(client):
+def test_retest_accepts_valid_fields(client, mock_pr_state_open):
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}):
         response = client.post('/api/retest', json={
             "owner": "openshift", "repo": "ovn-kubernetes", "pr": 1234,
@@ -149,7 +149,7 @@ def test_search_rejects_oversized_query_and_bad_pagination(client):
     assert client.post('/api/search', json={"query": "is:pr", "page": "1"}).status_code == 400
 
 
-def test_retest_accepts_string_pr_number(client):
+def test_retest_accepts_string_pr_number(client, mock_pr_state_open):
     """Regression: the frontend sends pr as a string (from prKey.split);
     digit-strings must be accepted, non-numeric strings still rejected."""
     with patch('pr_ci_dashboard.server.retest_jobs', return_value={"success": True}) as mock_retest:
