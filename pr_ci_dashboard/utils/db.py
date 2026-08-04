@@ -236,11 +236,10 @@ def get_permafail_status(job_urls, db_path=None):
             permafail_result = normalize_permafail_result(permafail_result)
             override = bool(row[2])
 
-            result[job_url] = {
-                "permafail": is_permafail_result(permafail_result),
-                "reason": permafail_result.get("reason", ""),
-                "override": override
-            }
+            full = dict(permafail_result)
+            full["permafail"] = is_permafail_result(permafail_result)
+            full["override"] = override
+            result[job_url] = full
 
         return result
     except sqlite3.Error as e:
@@ -298,12 +297,11 @@ def get_pr_permafail_status(repo, pr_number, db_path=None):
             # Only include if permafail=True (ignore non-permafail cached results)
             if is_permafail_result(permafail_result) and not override:
                 if job_name not in jobs:
-                    jobs[job_name] = {
-                        "permafail": True,
-                        "reason": permafail_result.get("reason", ""),
-                        "override": False,
-                        "job_urls": []
-                    }
+                    full = dict(permafail_result)
+                    full["permafail"] = True
+                    full["override"] = False
+                    full["job_urls"] = []
+                    jobs[job_name] = full
                 jobs[job_name]["job_urls"].append(job_url)
 
         return jobs
