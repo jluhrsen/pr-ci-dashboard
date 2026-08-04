@@ -26,7 +26,7 @@ GOOGLE_SESSIONS = {}
 
 SESSION_TTL = int(os.environ.get(
     'DASHBOARD_SESSION_TTL_SECONDS',
-    os.environ.get('GITHUB_SESSION_TTL_SECONDS', 8 * 3600)))
+    os.environ.get('GITHUB_SESSION_TTL_SECONDS', 84 * 3600)))
 
 
 def session_id():
