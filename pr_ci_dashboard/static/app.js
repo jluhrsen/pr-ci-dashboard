@@ -844,6 +844,8 @@ async function checkJobStatesForAutoRetest(prKey) {
         }
 
         // Process immediate retests (no permafail check needed)
+        // Collect eligible jobs first, then batch by type
+        const immediateRetestBatch = [];
         for (const { job, count } of jobsToRetestImmediately) {
             const jobKey = `${prKey}/${job.name}`;
 
@@ -879,13 +881,29 @@ async function checkJobStatesForAutoRetest(prKey) {
                 continue;
             }
 
-            console.log(`Auto-retesting ${job.name} (attempt ${count})`);
-            const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true, true);
+            immediateRetestBatch.push({ job, count, jobKey });
+        }
 
-            // Mark cooldown and show toast only after successful retest
-            if (retestResult === true) {
-                autoRetestCooldown.set(jobKey, now);
-                showToast(`🔄 Retesting ${job.name} (attempt ${count})`, 'info');
+        // Batch retest by type (one API call per type instead of per job)
+        if (immediateRetestBatch.length > 0) {
+            const byType = {};
+            for (const entry of immediateRetestBatch) {
+                const type = entry.job.type || 'e2e';
+                if (!byType[type]) byType[type] = [];
+                byType[type].push(entry);
+            }
+
+            for (const [type, entries] of Object.entries(byType)) {
+                const jobNames = entries.map(e => e.job.name);
+                console.log(`Auto-retesting ${jobNames.length} ${type} job(s): ${jobNames.join(', ')}`);
+                const retestResult = await retestJob(owner, repo, number, jobNames, type, true, true);
+
+                if (retestResult === true) {
+                    for (const { jobKey } of entries) {
+                        autoRetestCooldown.set(jobKey, now);
+                    }
+                    showToast(`🔄 Auto-retesting ${jobNames.length} ${type} job(s)`, 'info');
+                }
             }
         }
 
@@ -2383,6 +2401,11 @@ let nextToastId = 1;
 function showToast(message, type = 'success', duration = 5000) {
     // If duration is 0, make it persistent (no auto-remove)
     // Returns toast ID for updating
+
+    // Deduplicate: skip if an identical toast is already visible
+    for (const toast of activeToasts.values()) {
+        if (toast.textContent === message) return;
+    }
 
     const toastId = nextToastId++;
     const toast = createElement('div', `toast ${type}`, message);
