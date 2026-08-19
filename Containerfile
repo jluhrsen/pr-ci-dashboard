@@ -79,7 +79,7 @@ ENV CLAUDE_CODE_USE_VERTEX=1
 ENV CLOUD_ML_REGION=global
 # Model pinned: newer CLI default models may not be enabled on a given
 # Vertex project (data-sharing / IAM errors); override if yours differs
-ENV ANTHROPIC_MODEL=claude-opus-4-6
+ENV ANTHROPIC_MODEL=claude-opus-4-8
 
 # Dashboard database path
 # Runtime mount: /data PVC for persistence
@@ -117,12 +117,13 @@ ENV GOOGLE_OAUTH_HOSTED_DOMAIN=redhat.com
 ENV GITHUB_APP_ID=1460951
 ENV GITHUB_APP_PRIVATE_KEY_FILE=/secrets/github-app/private-key.pem
 
-# Install ai-helpers plugin as runtime user from PR #512 (detect-permafail skill)
+# Install ai-helpers plugin as runtime user (provides the ci:detect-permafail skill)
 # Plugin must install after HOME is set and USER is switched
 # Plugin install requires network access to plugin registry
 # Build will fail in environments without registry access (intentional - no silent partial builds)
-# Using PR #512 (branch CORENET-7149 from jluhrsen/ai-helpers) until detect-permafail is merged
-RUN claude plugin marketplace add https://github.com/jluhrsen/ai-helpers.git#CORENET-7149 && \
+# detect-permafail is now merged into openshift-eng/ai-helpers main, so we
+# install from the upstream marketplace (default branch) instead of a PR branch
+RUN claude plugin marketplace add openshift-eng/ai-helpers && \
     claude plugin install ci@ai-helpers
 
 # Verify plugin installed successfully via CLI

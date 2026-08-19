@@ -75,7 +75,7 @@ spec:
         # Model pin required: newer CLI default models are not enabled on
         # some Vertex projects and 403
         - name: ANTHROPIC_MODEL
-          value: claude-opus-4-6
+          value: claude-opus-4-8
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /secrets/gcp/sa.json
 
