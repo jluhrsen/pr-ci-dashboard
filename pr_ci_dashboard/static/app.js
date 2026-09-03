@@ -267,7 +267,7 @@ async function init() {
             const prKey = e.target.dataset.prKey;
             const enabled = e.target.checked;
             autoRetestEnabled.set(prKey, enabled);
-            saveAutoRetestState(prKey);
+            saveAutoRetestState(prKey, enabled ? null : 'manual (toggle)');
 
             if (enabled) {
                 startPollingForPR(prKey);
@@ -523,15 +523,17 @@ async function loadAutoRetestState() {
     }
 }
 
-async function saveAutoRetestState(prKey) {
+async function saveAutoRetestState(prKey, reason = null) {
     try {
+        const enabled = autoRetestEnabled.get(prKey) === true;
+        const body = {pr_key: prKey, enabled};
+        if (!enabled && reason) {
+            body.reason = reason;
+        }
         const response = await fetch('/api/auto-retest', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                pr_key: prKey,
-                enabled: autoRetestEnabled.get(prKey) === true
-            })
+            body: JSON.stringify(body)
         });
         const result = await response.json();
         if (result.error) {
@@ -643,9 +645,9 @@ function jumpToMonitoredPR(owner, repo, number) {
     executeSearch(query);
 }
 
-function disableMonitoredPR(prKey) {
+function disableMonitoredPR(prKey, reason = 'manual (monitor panel)') {
     autoRetestEnabled.set(prKey, false);
-    saveAutoRetestState(prKey);
+    saveAutoRetestState(prKey, reason);
     stopPollingForPR(prKey);
 
     // Update toggle in UI if PR is visible
@@ -707,11 +709,10 @@ async function checkJobStatesForAutoRetest(prKey) {
 
         const data = await response.json();
 
-        // If the PR is not confirmed open, disable auto-retest and stop polling
         const prState = data.pr?.state;
-        if (prState !== 'OPEN') {
+        if (prState === 'CLOSED' || prState === 'MERGED') {
             autoRetestEnabled.set(prKey, false);
-            saveAutoRetestState(prKey);
+            saveAutoRetestState(prKey, `PR is ${prState.toLowerCase()}`);
             stopPollingForPR(prKey);
 
             const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
@@ -721,11 +722,14 @@ async function checkJobStatesForAutoRetest(prKey) {
 
             clearPRJobCaches(prKey);
 
-            const reason = (prState === 'CLOSED' || prState === 'MERGED')
-                ? `PR is ${prState.toLowerCase()}`
-                : 'PR state could not be verified';
-            showToast(`Auto-retest disabled for PR #${number} — ${reason}`, 'info');
-            console.log(`Disabled auto-retest for ${prKey} - ${reason}`);
+            showToast(`Auto-retest disabled for PR #${number} — PR is ${prState.toLowerCase()}`, 'info');
+            console.log(`Disabled auto-retest for ${prKey} - PR is ${prState.toLowerCase()}`);
+            return;
+        }
+        if (prState !== 'OPEN') {
+            console.warn(
+                `Skipping auto-retest poll for ${prKey} - PR state is ${prState || 'missing'} (will retry)`
+            );
             return;
         }
 
@@ -1021,7 +1025,7 @@ async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck, r
     if (allFailingJobsPermafail) {
         // Disable auto-retest since all failing jobs are permafails
         autoRetestEnabled.set(prKey, false);
-        saveAutoRetestState(prKey);
+        saveAutoRetestState(prKey, 'all failing jobs are permafails');
         stopPollingForPR(prKey);
 
         // Update UI toggle

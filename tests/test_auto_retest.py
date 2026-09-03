@@ -1,7 +1,7 @@
 """Tests for server-side auto-retest state (DB helpers and API endpoints)."""
 import pytest
 from pr_ci_dashboard.server import app
-from pr_ci_dashboard.utils.db import init_db, get_auto_retest_state, set_auto_retest_state
+from pr_ci_dashboard.utils.db import init_db, get_auto_retest_state, set_auto_retest_state, get_audit_log
 
 
 @pytest.fixture
@@ -109,3 +109,32 @@ def test_api_set_invalid_json(client):
     response = client.post('/api/auto-retest', data="not json",
                            content_type='application/json')
     assert response.status_code == 400
+
+
+def test_api_disable_records_audit_reason(client, db_path):
+    """Disabling auto-retest with a reason appends an audit log entry."""
+    client.post('/api/auto-retest', json={
+        "pr_key": "openshift/ovn-kubernetes/1234",
+        "enabled": True,
+    })
+    response = client.post('/api/auto-retest', json={
+        "pr_key": "openshift/ovn-kubernetes/1234",
+        "enabled": False,
+        "reason": "all failing jobs are permafails",
+    })
+    assert response.status_code == 200
+
+    entries = get_audit_log(limit=10, db_path=db_path)
+    disable_entries = [e for e in entries if e["action"] == "auto-retest-disable"]
+    assert len(disable_entries) == 1
+    assert disable_entries[0]["target"] == "openshift/ovn-kubernetes/1234"
+    assert disable_entries[0]["result"] == "all failing jobs are permafails"
+
+
+def test_api_disable_without_reason_records_default(client, db_path):
+    """Disabling without a reason still records an audit entry."""
+    client.post('/api/auto-retest', json={"pr_key": "o/r/1", "enabled": False})
+
+    entries = get_audit_log(limit=5, db_path=db_path)
+    assert entries[0]["action"] == "auto-retest-disable"
+    assert entries[0]["result"] == "no reason given"

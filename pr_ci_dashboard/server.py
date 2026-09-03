@@ -542,7 +542,8 @@ def api_auto_retest_get():
 def api_auto_retest_set():
     """Set auto-retest enablement for a PR.
 
-    Request: {"pr_key": "owner/repo/number", "enabled": bool}
+    Request: {"pr_key": "owner/repo/number", "enabled": bool, "reason": str (optional)}
+    When enabled is false, reason is recorded in the audit log.
     """
     data = request.get_json(silent=True)
     if not data:
@@ -561,6 +562,16 @@ def api_auto_retest_set():
 
     try:
         set_auto_retest_state(pr_key, enabled, db_path=app.config.get('DB_PATH'))
+        if not enabled:
+            reason = data.get('reason')
+            audit_result = reason.strip() if isinstance(reason, str) and reason.strip() else 'no reason given'
+            record_audit(
+                current_actor(),
+                'auto-retest-disable',
+                pr_key,
+                audit_result,
+                db_path=app.config.get('DB_PATH'),
+            )
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": f"Internal server error: {str(e)}"}), 500
