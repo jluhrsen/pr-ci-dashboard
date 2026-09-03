@@ -17,6 +17,8 @@ Deploy changes from this repo to the local `flake-buster` container.
 - `~/.config/fb.env` exists with runtime secrets
 - Podman secret `fb-github-app-key` is configured
 - Volume `fb-data` exists (created automatically on first run)
+- `podman login quay.io` (required for push)
+- `CI_REGISTRY_TOKEN` + `podman login registry.ci.openshift.org` (required for full `Containerfile` rebuild)
 
 ## Workflow
 
@@ -44,10 +46,29 @@ git push
 
 ### 2. Build and push image
 
-From the repository root:
+From the repository root, try the full image build first:
 
 ```bash
 podman build -f Containerfile -t quay.io/jluhrsen/pr-ci-dashboard:latest .
+```
+
+If the OpenShift builder base image is unavailable (registry auth), use an incremental rebuild from the published image instead:
+
+```bash
+podman build -f - -t quay.io/jluhrsen/pr-ci-dashboard:latest . <<'EOF'
+FROM quay.io/jluhrsen/pr-ci-dashboard:latest
+USER 0
+WORKDIR /app
+COPY . /app
+RUN pip3.11 install --no-cache-dir /app
+USER 1001
+WORKDIR /home/claude
+EOF
+```
+
+Push to Quay:
+
+```bash
 podman push quay.io/jluhrsen/pr-ci-dashboard:latest
 ```
 
@@ -56,6 +77,8 @@ podman push quay.io/jluhrsen/pr-ci-dashboard:latest
 ```bash
 podman pull quay.io/jluhrsen/pr-ci-dashboard:latest
 ```
+
+Skip this step when `podman push` failed but the local build succeeded; use the locally tagged image for step 4.
 
 ### 4. Replace running container
 
