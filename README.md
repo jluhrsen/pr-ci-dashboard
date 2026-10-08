@@ -14,7 +14,8 @@ failures as permafails.
 - Shows consecutive failures with links to their Prow runs.
 - Posts `/test <job>` and `/payload-job <job>` comments.
 - Polls manually retested jobs until they start running.
-- Optionally auto-retests the first two failures and analyzes later failures.
+- Optionally auto-retests until a per-PR consecutive-failure limit, then stops
+  or runs AI permafail analysis, depending on a per-PR switch.
 - Caches analysis results, auto-retest settings, and an audit trail in SQLite.
 - Supports local `gh` credentials, per-user GitHub/Google OAuth, and a GitHub
   App bot fallback.
@@ -114,14 +115,21 @@ work when Claude or Vertex credentials are unavailable.
 
 ## Auto-retest behavior
 
-Auto-retest is opt-in per PR:
+Auto-retest is opt-in per PR. Each PR card carries three controls: the
+auto-retest toggle, a failure limit (1–10 consecutive failures, default 3), and
+an AI permafail analysis switch that is off by default.
 
-1. A first or second consecutive failure is retested.
-2. At three or more consecutive failures, analysis runs before another retest
-   when at least two run URLs are available.
-3. A confirmed permafail is not retested.
-4. Monitoring stops when every remaining failed job is a permafail and no job
-   is running.
+1. A job below the failure limit is retested.
+2. At the limit, with AI analysis **off**, the job stops being retested and
+   gets a `🛑 retest limit` badge. No analysis runs.
+3. At the limit, with AI analysis **on**, analysis runs before another retest
+   when at least two run URLs are available. A non-permafail is retested; a
+   confirmed permafail is not.
+4. Monitoring stops when every remaining failed job is blocked — permafail or
+   at the retest limit — and no job is running.
+
+Raising the limit, or flipping either switch, clears the stop marks for that
+PR, so retesting can resume on the next poll.
 
 Auto-retest settings are shared in SQLite, but polling and cooldowns currently
 live in each open browser tab. A browser must remain open, and multiple tabs or
@@ -223,7 +231,7 @@ The default database is:
 Override it with `--db-path` or `PR_CI_DASHBOARD_DB`. The schema contains:
 
 - `job_analyses` — cached permafail results and overrides;
-- `auto_retest` — enabled PR monitors;
+- `auto_retest` — PR monitors with their AI switch and failure limit;
 - `audit_log` — retest and analysis actions.
 
 Common environment variables:

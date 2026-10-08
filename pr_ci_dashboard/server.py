@@ -18,7 +18,8 @@ from .utils.session_store import (
     get_session_github, get_session_google, current_actor,
 )
 from .utils.db import (init_db, get_auto_retest_state, set_auto_retest_state,
-                       record_audit, get_audit_log, DB_PATH)
+                       record_audit, get_audit_log, DB_PATH,
+                       MIN_FAILURE_THRESHOLD, MAX_FAILURE_THRESHOLD)
 from .utils import validation
 from .utils import rate_limit
 
@@ -530,7 +531,9 @@ def api_google_oauth_disconnect():
 
 @app.route('/api/auto-retest', methods=['GET'])
 def api_auto_retest_get():
-    """Get auto-retest enablement for all PRs: {"owner/repo/number": bool, ...}"""
+    """Get auto-retest config for all PRs:
+    {"owner/repo/number": {"enabled": bool, "ai_enabled": bool, "failure_threshold": int}, ...}
+    """
     try:
         state = get_auto_retest_state(db_path=app.config.get('DB_PATH'))
         return jsonify(state)
@@ -540,9 +543,12 @@ def api_auto_retest_get():
 
 @app.route('/api/auto-retest', methods=['POST'])
 def api_auto_retest_set():
-    """Set auto-retest enablement for a PR.
+    """Set auto-retest config for a PR.
 
-    Request: {"pr_key": "owner/repo/number", "enabled": bool, "reason": str (optional)}
+    Request: {"pr_key": "owner/repo/number", "enabled": bool,
+              "ai_enabled": bool (optional), "failure_threshold": int (optional),
+              "reason": str (optional)}
+    Omitted ai_enabled/failure_threshold keep their stored values.
     When enabled is false, reason is recorded in the audit log.
     """
     data = request.get_json(silent=True)
@@ -560,9 +566,40 @@ def api_auto_retest_set():
     if len(parts) != 3 or not parts[0] or not parts[1] or not parts[2].isdigit():
         return jsonify({"error": "pr_key must be owner/repo/number"}), 400
 
+    ai_enabled = data.get('ai_enabled')
+    if ai_enabled is not None and not isinstance(ai_enabled, bool):
+        return jsonify({"error": "ai_enabled must be a bool"}), 400
+
+    failure_threshold = data.get('failure_threshold')
+    if 'failure_threshold' in data:
+        if (not isinstance(failure_threshold, int) or isinstance(failure_threshold, bool)
+                or not MIN_FAILURE_THRESHOLD <= failure_threshold <= MAX_FAILURE_THRESHOLD):
+            return jsonify({
+                "error": f"failure_threshold must be an int between "
+                         f"{MIN_FAILURE_THRESHOLD} and {MAX_FAILURE_THRESHOLD}"
+            }), 400
+
     try:
-        set_auto_retest_state(pr_key, enabled, db_path=app.config.get('DB_PATH'))
-        if not enabled:
+        set_auto_retest_state(pr_key, enabled, ai_enabled=ai_enabled,
+                              failure_threshold=failure_threshold,
+                              db_path=app.config.get('DB_PATH'))
+        if ai_enabled is not None or failure_threshold is not None:
+            changes = []
+            if ai_enabled is not None:
+                changes.append(f"ai_enabled={ai_enabled}")
+            if failure_threshold is not None:
+                changes.append(f"failure_threshold={failure_threshold}")
+            record_audit(
+                current_actor(),
+                'auto-retest-config',
+                pr_key,
+                '; '.join(changes),
+                db_path=app.config.get('DB_PATH'),
+            )
+        # A config-only change carries the PR's current (possibly off) enabled
+        # value; it is not a disable action, so it gets no disable entry
+        is_config_change = ai_enabled is not None or failure_threshold is not None
+        if not enabled and not is_config_change:
             reason = data.get('reason')
             audit_result = reason.strip() if isinstance(reason, str) and reason.strip() else 'no reason given'
             record_audit(

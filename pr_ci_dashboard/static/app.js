@@ -10,15 +10,20 @@ const retestedJobs = new Map();
 const POLL_INTERVAL = 5000; // 5 seconds
 const MAX_POLL_TIME = 5 * 60 * 1000; // 5 minutes
 
-// Permafail detection thresholds
-const MAX_AUTO_RETEST_FAILURES = 2; // Auto-retest up to 2 consecutive failures
-const PERMAFAIL_CHECK_THRESHOLD = 3; // Check for permafail on 3rd consecutive failure
+// Failure limit: auto-retest stops once a job reaches this many consecutive
+// failures. Configurable per PR; these are the defaults and allowed range.
+const DEFAULT_FAILURE_THRESHOLD = 3;
+const MIN_FAILURE_THRESHOLD = 1;
+const MAX_FAILURE_THRESHOLD = 10;
 
 // Permafail tracking
 const permafailJobs = new Map(); // jobKey -> {permafail: bool, reason: str, override: bool}
 
 // Auto-retest state tracking
 const autoRetestEnabled = new Map(); // "owner/repo/number" -> boolean
+const aiAnalysisEnabled = new Map(); // "owner/repo/number" -> boolean (AI permafail analysis at the limit)
+const failureThresholds = new Map(); // "owner/repo/number" -> int
+const retestLimitJobs = new Map(); // "owner/repo/number/jobName" -> count (stopped at the limit, AI off)
 const jobFailureCounters = new Map(); // "owner/repo/number/jobName" -> count
 const jobStateCache = new Map(); // "owner/repo/number/jobName" -> 'success'|'failure'|'pending'
 const pollingIntervals = new Map(); // "owner/repo/number" -> intervalId
@@ -267,6 +272,11 @@ async function init() {
             const prKey = e.target.dataset.prKey;
             const enabled = e.target.checked;
             autoRetestEnabled.set(prKey, enabled);
+            if (enabled) {
+                // Re-arming after the limit stopped retests clears the stop marks
+                clearRetestLimitState(prKey);
+                resetJobEvaluationState(prKey);
+            }
             saveAutoRetestState(prKey, enabled ? null : 'manual (toggle)');
 
             if (enabled) {
@@ -276,6 +286,36 @@ async function init() {
                 stopPollingForPR(prKey);
                 showToast(`Auto-retest disabled for PR ${prKey.split('/').pop()}`, 'info');
             }
+        }
+
+        if (e.target.classList.contains('ai-analysis-toggle')) {
+            const prKey = e.target.dataset.prKey;
+            const enabled = e.target.checked;
+            aiAnalysisEnabled.set(prKey, enabled);
+            // Jobs parked at the limit get another chance under the new setting
+            clearRetestLimitState(prKey);
+            resetJobEvaluationState(prKey);
+            saveAutoRetestState(prKey, null, {ai_enabled: enabled});
+
+            const threshold = getFailureThreshold(prKey);
+            showToast(
+                enabled
+                    ? `🤖 AI permafail analysis enabled at ${threshold} failures for PR ${prKey.split('/').pop()}`
+                    : `AI permafail analysis disabled for PR ${prKey.split('/').pop()} — retesting stops at ${threshold} failures`,
+                'info'
+            );
+        }
+
+        if (e.target.classList.contains('failure-threshold-input')) {
+            const prKey = e.target.dataset.prKey;
+            const threshold = normalizeFailureThreshold(e.target.value);
+            e.target.value = threshold;
+            failureThresholds.set(prKey, threshold);
+            clearRetestLimitState(prKey);
+            resetJobEvaluationState(prKey);
+            saveAutoRetestState(prKey, null, {failure_threshold: threshold});
+
+            showToast(`Retest limit set to ${threshold} consecutive failures for PR ${prKey.split('/').pop()}`, 'info');
         }
     });
 }
@@ -463,6 +503,63 @@ async function checkAuth() {
 // ========================================
 // Auto-Retest State Management
 // ========================================
+function normalizeFailureThreshold(value) {
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        return DEFAULT_FAILURE_THRESHOLD;
+    }
+    return Math.min(MAX_FAILURE_THRESHOLD, Math.max(MIN_FAILURE_THRESHOLD, parsed));
+}
+
+function getFailureThreshold(prKey) {
+    const stored = failureThresholds.get(prKey);
+    return stored === undefined ? DEFAULT_FAILURE_THRESHOLD : stored;
+}
+
+function isAiAnalysisEnabled(prKey) {
+    return aiAnalysisEnabled.get(prKey) === true;
+}
+
+function isJobBlockedFromRetest(jobKey) {
+    /**
+     * A job stops being auto-retested when AI marked it a permafail or when it
+     * hit the PR's failure limit with AI analysis off.
+     */
+    const permafailStatus = permafailJobs.get(jobKey);
+    if (permafailStatus && permafailStatus.permafail && !permafailStatus.override) {
+        return true;
+    }
+    return retestLimitJobs.has(jobKey);
+}
+
+function clearRetestLimitState(prKey) {
+    const prefix = `${prKey}/`;
+    for (const key of [...retestLimitJobs.keys()]) {
+        if (key.startsWith(prefix)) {
+            retestLimitJobs.delete(key);
+        }
+    }
+    const [owner, repo, number] = prKey.split('/');
+    const card = document.getElementById(`pr-${owner}-${repo}-${number}`);
+    if (card) {
+        card.querySelectorAll('.retest-limit-badge').forEach(badge => badge.remove());
+    }
+}
+
+function resetJobEvaluationState(prKey) {
+    /**
+     * Forget cached job states so the next poll re-evaluates every failing job
+     * from scratch against the PR's current settings. Cooldowns are left alone,
+     * so this cannot cause a burst of retests.
+     */
+    const prefix = `${prKey}/`;
+    for (const key of [...jobStateCache.keys()]) {
+        if (key.startsWith(prefix)) {
+            jobStateCache.delete(key);
+        }
+    }
+}
+
 async function loadAutoRetestState() {
     try {
         // One-time migration: push any legacy browser-local state to the server.
@@ -510,10 +607,14 @@ async function loadAutoRetestState() {
         // state wins for any key present in both
         const merged = Object.assign({}, legacyEntries || {}, state);
         Object.entries(merged).forEach(([key, val]) => {
-            autoRetestEnabled.set(key, val === true);
+            // Legacy browser entries are plain booleans; server records are objects
+            const record = typeof val === 'boolean' ? {enabled: val} : (val || {});
+            autoRetestEnabled.set(key, record.enabled === true);
+            aiAnalysisEnabled.set(key, record.ai_enabled === true);
+            failureThresholds.set(key, normalizeFailureThreshold(record.failure_threshold));
             // Start polling for all enabled PRs immediately on page load
             // (startPollingForPR is a no-op for already-polling PRs)
-            if (val === true) {
+            if (record.enabled === true) {
                 startPollingForPR(key);
             }
         });
@@ -523,10 +624,14 @@ async function loadAutoRetestState() {
     }
 }
 
-async function saveAutoRetestState(prKey, reason = null) {
+async function saveAutoRetestState(prKey, reason = null, config = {}) {
+    /**
+     * Persist auto-retest state. `config` carries explicit AI switch or
+     * failure-threshold changes; omitted fields keep their stored values.
+     */
     try {
         const enabled = autoRetestEnabled.get(prKey) === true;
-        const body = {pr_key: prKey, enabled};
+        const body = {pr_key: prKey, enabled, ...config};
         if (!enabled && reason) {
             body.reason = reason;
         }
@@ -651,7 +756,7 @@ function disableMonitoredPR(prKey, reason = 'manual (monitor panel)') {
     stopPollingForPR(prKey);
 
     // Update toggle in UI if PR is visible
-    const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
+    const toggleElement = document.querySelector(`.auto-retest-toggle[data-pr-key="${prKey}"]`);
     if (toggleElement) {
         toggleElement.checked = false;
     }
@@ -688,7 +793,8 @@ function stopPollingForPR(prKey) {
 
 function clearPRJobCaches(prKey) {
     const prefix = `${prKey}/`;
-    for (const map of [jobStateCache, jobFailureCounters, autoRetestCooldown, permafailJobs]) {
+    for (const map of [jobStateCache, jobFailureCounters, autoRetestCooldown, permafailJobs,
+                       retestLimitJobs]) {
         for (const key of [...map.keys()]) {
             if (key.startsWith(prefix)) {
                 map.delete(key);
@@ -715,7 +821,7 @@ async function checkJobStatesForAutoRetest(prKey) {
             saveAutoRetestState(prKey, `PR is ${prState.toLowerCase()}`);
             stopPollingForPR(prKey);
 
-            const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
+            const toggleElement = document.querySelector(`.auto-retest-toggle[data-pr-key="${prKey}"]`);
             if (toggleElement) {
                 toggleElement.checked = false;
             }
@@ -784,8 +890,10 @@ async function checkJobStatesForAutoRetest(prKey) {
         }
 
         // Separate jobs into categories for processing
+        const failureThreshold = getFailureThreshold(prKey);
+        const aiEnabled = isAiAnalysisEnabled(prKey);
         const jobsToRetestImmediately = [];
-        const jobsNeedingPermafailCheck = [];
+        const jobsAtFailureLimit = [];
 
         for (const job of allJobs) {
             const jobKey = `${prKey}/${job.name}`;
@@ -794,25 +902,25 @@ async function checkJobStatesForAutoRetest(prKey) {
 
             // First poll (previousState undefined): seed failure counter from
             // the script's authoritative count and queue for processing.
-            // The hard guard in the retest loop will route high-consecutive
-            // jobs to permafail analysis instead of retesting immediately.
+            // The hard guard in the retest loop will route jobs at the failure
+            // limit to the limit handler instead of retesting immediately.
             if (previousState === undefined && currentState === 'failure') {
                 const consecutiveFailures = job.consecutive || job.urls?.length || 1;
                 jobFailureCounters.set(jobKey, consecutiveFailures);
 
-                if (consecutiveFailures <= MAX_AUTO_RETEST_FAILURES) {
+                if (consecutiveFailures < failureThreshold) {
                     jobsToRetestImmediately.push({ job, count: consecutiveFailures });
-                } else if (consecutiveFailures >= PERMAFAIL_CHECK_THRESHOLD) {
-                    jobsNeedingPermafailCheck.push({ job, count: consecutiveFailures });
+                } else {
+                    jobsAtFailureLimit.push({ job, count: consecutiveFailures });
                 }
             }
-            // Still failed: re-queue for permafail check only if never analyzed
+            // Still failed: re-queue for the limit handler only if never handled
             // (handles retry after a previous analysis error)
             else if (previousState === 'failure' && currentState === 'failure') {
                 const count = jobFailureCounters.get(jobKey) || 0;
                 const permafailStatus = permafailJobs.get(jobKey);
-                if (count >= PERMAFAIL_CHECK_THRESHOLD && !permafailStatus) {
-                    jobsNeedingPermafailCheck.push({ job, count });
+                if (count >= failureThreshold && !permafailStatus && !retestLimitJobs.has(jobKey)) {
+                    jobsAtFailureLimit.push({ job, count });
                 }
             }
             // Detect state transitions that result in failure
@@ -821,16 +929,17 @@ async function checkJobStatesForAutoRetest(prKey) {
                 const count = Math.max((jobFailureCounters.get(jobKey) || 0) + 1, scriptCount);
                 jobFailureCounters.set(jobKey, count);
 
-                if (count <= MAX_AUTO_RETEST_FAILURES) {
+                if (count < failureThreshold) {
                     jobsToRetestImmediately.push({ job, count });
-                } else if (count >= PERMAFAIL_CHECK_THRESHOLD) {
-                    jobsNeedingPermafailCheck.push({ job, count });
+                } else {
+                    jobsAtFailureLimit.push({ job, count });
                 }
             }
 
             // Update cache and clear failure/permafail state if job is no longer failing
             if (currentState === 'success' || currentState === 'pending') {
                 jobFailureCounters.delete(jobKey);
+                retestLimitJobs.delete(jobKey);
                 const pf = permafailJobs.get(jobKey);
                 if (pf && !pf.permafail) {
                     permafailJobs.delete(jobKey);
@@ -853,20 +962,19 @@ async function checkJobStatesForAutoRetest(prKey) {
         for (const { job, count } of jobsToRetestImmediately) {
             const jobKey = `${prKey}/${job.name}`;
 
-            // Hard guard: if the script reports high consecutive failures,
-            // route through permafail analysis instead of retesting immediately
+            // Hard guard: if the script reports the job already at the failure
+            // limit, route it to the limit handler instead of retesting
             const scriptConsecutive = job.consecutive || job.urls?.length || 0;
-            if (scriptConsecutive >= PERMAFAIL_CHECK_THRESHOLD) {
-                console.log(`Routing ${job.name} to permafail check - script reports ${scriptConsecutive} consecutive failures`);
-                jobsNeedingPermafailCheck.push({ job, count: scriptConsecutive });
+            if (scriptConsecutive >= failureThreshold) {
+                console.log(`Routing ${job.name} to failure-limit handling - script reports ${scriptConsecutive} consecutive failures`);
+                jobsAtFailureLimit.push({ job, count: scriptConsecutive });
                 jobFailureCounters.set(jobKey, scriptConsecutive);
                 continue;
             }
 
-            // Skip if already marked as permafail
-            const permafailStatus = permafailJobs.get(jobKey);
-            if (permafailStatus && permafailStatus.permafail && !permafailStatus.override) {
-                console.log(`Skipping auto-retest for ${job.name} - marked as permafail`);
+            // Skip jobs marked as permafail or already stopped at the limit
+            if (isJobBlockedFromRetest(jobKey)) {
+                console.log(`Skipping auto-retest for ${job.name} - permafail or retest limit reached`);
                 continue;
             }
 
@@ -911,23 +1019,28 @@ async function checkJobStatesForAutoRetest(prKey) {
             }
         }
 
-        // Process permafail checks in batches of 2 with progress indicator
-        if (jobsNeedingPermafailCheck.length > 0) {
-            // Filter out jobs already marked as permafail (avoid re-checking)
-            const jobsToCheck = jobsNeedingPermafailCheck.filter(({ job }) => {
-                const jobKey = `${prKey}/${job.name}`;
-                const permafailStatus = permafailJobs.get(jobKey);
-                const isAlreadyPermafail = permafailStatus && permafailStatus.permafail && !permafailStatus.override;
+        // Jobs that reached the failure limit: analyze with AI when the PR has
+        // it switched on, otherwise just stop retesting them
+        if (jobsAtFailureLimit.length > 0) {
+            if (aiEnabled) {
+                // Filter out jobs already marked as permafail (avoid re-checking)
+                const jobsToCheck = jobsAtFailureLimit.filter(({ job }) => {
+                    const jobKey = `${prKey}/${job.name}`;
+                    const permafailStatus = permafailJobs.get(jobKey);
+                    const isAlreadyPermafail = permafailStatus && permafailStatus.permafail && !permafailStatus.override;
 
-                if (isAlreadyPermafail) {
-                    console.log(`Skipping permafail check for ${job.name} - already marked as permafail`);
+                    if (isAlreadyPermafail) {
+                        console.log(`Skipping permafail check for ${job.name} - already marked as permafail`);
+                    }
+
+                    return !isAlreadyPermafail;
+                });
+
+                if (jobsToCheck.length > 0) {
+                    await processPermafailChecks(owner, repo, number, prKey, jobsToCheck, runningJobNames);
                 }
-
-                return !isAlreadyPermafail;
-            });
-
-            if (jobsToCheck.length > 0) {
-                await processPermafailChecks(owner, repo, number, prKey, jobsToCheck, runningJobNames);
+            } else {
+                await stopRetestingAtFailureLimit(prKey, jobsAtFailureLimit, failureThreshold);
             }
         }
 
@@ -941,7 +1054,7 @@ async function checkJobStatesForAutoRetest(prKey) {
     }
 }
 
-async function checkIfAllFailingJobsArePermafail(prKey) {
+async function checkIfAllFailingJobsBlocked(prKey) {
     const [owner, repo, number] = prKey.split('/');
 
     try {
@@ -975,23 +1088,92 @@ async function checkIfAllFailingJobsArePermafail(prKey) {
             return false;
         }
 
-        // Check if ALL failed jobs are marked as permafail
+        // Check if every failed job is blocked (permafail or at the retest limit)
         for (const job of failedJobs) {
-            const jobKey = `${prKey}/${job.name}`;
-            const permafailStatus = permafailJobs.get(jobKey);
-
-            // If job is NOT marked permafail or is overridden, return false
-            if (!permafailStatus || !permafailStatus.permafail || permafailStatus.override) {
+            if (!isJobBlockedFromRetest(`${prKey}/${job.name}`)) {
                 return false;
             }
         }
 
-        // All failed jobs are permafails AND no running jobs
+        // Every failed job is blocked AND no running jobs
         return true;
     } catch (error) {
-        console.error(`Error checking if all jobs are permafail for ${prKey}:`, error);
+        console.error(`Error checking if all jobs are blocked for ${prKey}:`, error);
         return false;
     }
+}
+
+function disableAutoRetestForPR(prKey, reason, toastMessage, lockToggle = false) {
+    /**
+     * Turn auto-retest off for a PR after every failing job stopped being
+     * retestable, and reflect that in the card's toggle. `lockToggle` also
+     * disables the checkbox (permafails cannot be retested away; a raised
+     * failure limit can, so the limit path leaves the toggle usable).
+     */
+    autoRetestEnabled.set(prKey, false);
+    saveAutoRetestState(prKey, reason);
+    stopPollingForPR(prKey);
+
+    const toggleElement = document.querySelector(`.auto-retest-toggle[data-pr-key="${prKey}"]`);
+    if (toggleElement) {
+        toggleElement.checked = false;
+        if (lockToggle) {
+            toggleElement.disabled = true;
+        }
+    }
+
+    showToast(toastMessage, 'error');
+    console.log(`Disabled auto-retest for ${prKey} - ${reason}`);
+}
+
+async function stopRetestingAtFailureLimit(prKey, jobsAtLimit, failureThreshold) {
+    /**
+     * AI analysis is off for this PR: jobs that reached the failure limit stop
+     * being retested, no analysis is triggered.
+     */
+    const [owner, repo, number] = prKey.split('/');
+    const card = document.getElementById(`pr-${owner}-${repo}-${number}`);
+    const newlyStopped = [];
+
+    for (const { job, count } of jobsAtLimit) {
+        const jobKey = `${prKey}/${job.name}`;
+        if (retestLimitJobs.has(jobKey)) continue;
+
+        retestLimitJobs.set(jobKey, count);
+        newlyStopped.push(job.name);
+
+        const jobElement = card?.querySelector(`[data-job-name="${job.name}"]`);
+        if (jobElement) {
+            renderRetestLimitBadge(jobElement, count, failureThreshold);
+        }
+    }
+
+    if (newlyStopped.length > 0) {
+        showToast(
+            `🛑 Retest limit (${failureThreshold}) reached for ${newlyStopped.join(', ')} on PR #${number} — AI analysis is off`,
+            'info'
+        );
+    }
+
+    if (await checkIfAllFailingJobsBlocked(prKey)) {
+        disableAutoRetestForPR(
+            prKey,
+            `retest limit (${failureThreshold} consecutive failures) reached, AI analysis off`,
+            `⚠️ Retest limit reached on all failing jobs - auto-retest disabled for PR #${number}`
+        );
+    }
+}
+
+function renderRetestLimitBadge(jobElement, count, failureThreshold) {
+    const jobHeader = jobElement.querySelector('.job-name') || jobElement;
+
+    const existing = jobElement.querySelector('.retest-limit-badge');
+    if (existing) existing.remove();
+
+    const badge = createElement('span', 'retest-limit-badge', '🛑 retest limit');
+    badge.title = `${count} consecutive failures (limit ${failureThreshold}). `
+        + 'Auto-retest stopped; AI permafail analysis is off for this PR.';
+    jobHeader.appendChild(badge);
 }
 
 async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck, runningJobNames) {
@@ -1019,24 +1201,16 @@ async function processPermafailChecks(owner, repo, number, prKey, jobsToCheck, r
     // Remove progress toast
     removeToast(progressToastId);
 
-    // Check if ALL failing jobs are now marked as permafail
-    const allFailingJobsPermafail = await checkIfAllFailingJobsArePermafail(prKey);
+    // Check if ALL failing jobs are now blocked from retesting
+    const allFailingJobsBlocked = await checkIfAllFailingJobsBlocked(prKey);
 
-    if (allFailingJobsPermafail) {
-        // Disable auto-retest since all failing jobs are permafails
-        autoRetestEnabled.set(prKey, false);
-        saveAutoRetestState(prKey, 'all failing jobs are permafails');
-        stopPollingForPR(prKey);
-
-        // Update UI toggle
-        const toggleElement = document.querySelector(`[data-pr-key="${prKey}"]`);
-        if (toggleElement) {
-            toggleElement.checked = false;
-            toggleElement.disabled = true;
-        }
-
-        showToast(`⚠️ All failing jobs are permafails - auto-retest disabled for PR #${number}`, 'error');
-        console.log(`Disabled auto-retest for ${prKey} - all failing jobs are permafails`);
+    if (allFailingJobsBlocked) {
+        disableAutoRetestForPR(
+            prKey,
+            'all failing jobs are permafails',
+            `⚠️ All failing jobs are permafails - auto-retest disabled for PR #${number}`,
+            true
+        );
     } else {
         showToast(`✅ Completed permafail analysis for ${totalJobs} jobs`, 'success');
     }
@@ -1151,7 +1325,7 @@ async function checkPermafailBeforeRetest(owner, repo, number, job, prKey, runni
     } catch (error) {
         console.error('Error checking permafail:', error);
         const failureCount = jobFailureCounters.get(jobKey) || 0;
-        if (failureCount <= PERMAFAIL_CHECK_THRESHOLD) {
+        if (failureCount <= getFailureThreshold(prKey)) {
             const retestResult = await retestJob(owner, repo, number, [job.name], job.type || 'e2e', true, true);
             if (retestResult === true) {
                 autoRetestCooldown.set(jobKey, now);
@@ -1818,6 +1992,34 @@ function createPRCard(pr) {
     toggleLabel.appendChild(document.createTextNode(' 🔄 Auto-retest on failure'));
     autoRetestControl.appendChild(toggleLabel);
 
+    // Failure limit: retesting stops once a job hits this many failures in a row
+    const thresholdLabel = createElement('label', 'failure-threshold-label');
+    thresholdLabel.appendChild(document.createTextNode('Stop after '));
+    const thresholdInput = createElement('input', 'failure-threshold-input');
+    thresholdInput.type = 'number';
+    thresholdInput.min = MIN_FAILURE_THRESHOLD;
+    thresholdInput.max = MAX_FAILURE_THRESHOLD;
+    thresholdInput.step = 1;
+    thresholdInput.value = getFailureThreshold(prKey);
+    thresholdInput.dataset.prKey = prKey;
+    thresholdInput.title = 'Consecutive failures that stop auto-retest for a job';
+    thresholdLabel.appendChild(thresholdInput);
+    thresholdLabel.appendChild(document.createTextNode(' consecutive failures'));
+    autoRetestControl.appendChild(thresholdLabel);
+
+    // AI switch: at the limit, either analyze for permafail or just stop
+    const aiLabel = createElement('label');
+    const aiCheckbox = createElement('input', 'ai-analysis-toggle');
+    aiCheckbox.type = 'checkbox';
+    aiCheckbox.dataset.prKey = prKey;
+    aiCheckbox.checked = isAiAnalysisEnabled(prKey);
+    aiLabel.title = 'At the limit, run Claude permafail analysis: retesting continues '
+        + 'when the failure is not a permafail, and stops when it is. '
+        + 'Off means retesting just stops at the limit.';
+    aiLabel.appendChild(aiCheckbox);
+    aiLabel.appendChild(document.createTextNode(' 🤖 AI permafail analysis at the limit'));
+    autoRetestControl.appendChild(aiLabel);
+
     // Start polling if toggle is already enabled
     if (toggleCheckbox.checked) {
         startPollingForPR(prKey);
@@ -1983,6 +2185,12 @@ function renderJobItems(list, failedJobs, owner, repo, number, jobType) {
             }
         }
 
+        // Re-apply the stop marker for jobs parked at the failure limit
+        const limitCount = retestLimitJobs.get(jobKey);
+        if (limitCount !== undefined) {
+            renderRetestLimitBadge(jobItem, limitCount, getFailureThreshold(`${owner}/${repo}/${number}`));
+        }
+
         list.appendChild(jobItem);
     });
 
@@ -2050,9 +2258,9 @@ function createAnalyzeButton() {
 function createCheckPermafailButton(job, owner, repo, number) {
     const btn = createElement('button', 'btn btn-secondary check-permafail-btn', 'Check for Permafail');
 
-    // Show button only if meets permafail check threshold
+    // Show button only once the job reached this PR's failure limit
     const consecutiveFailures = job.urls?.length || job.consecutive || 0;
-    if (consecutiveFailures < PERMAFAIL_CHECK_THRESHOLD) {
+    if (consecutiveFailures < getFailureThreshold(`${owner}/${repo}/${number}`)) {
         btn.style.display = 'none';
     }
 
@@ -2080,18 +2288,25 @@ function createRetestAllButton(owner, repo, number, displayType, jobType, active
 // Permafail Detection
 // ========================================
 async function handleFailedJob(job, consecutiveFailures, owner, repo, pr) {
-    const jobKey = `${owner}/${repo}/${pr}/${job.name}`;
+    const prKey = `${owner}/${repo}/${pr}`;
+    const jobKey = `${prKey}/${job.name}`;
+    const failureThreshold = getFailureThreshold(prKey);
 
-    if (consecutiveFailures <= MAX_AUTO_RETEST_FAILURES) {
-        // 1st or 2nd failure: would auto-retest immediately (future enhancement)
+    if (consecutiveFailures < failureThreshold) {
+        // Below the limit: would auto-retest immediately (future enhancement)
         return;
     }
 
-    if (consecutiveFailures === PERMAFAIL_CHECK_THRESHOLD) {
-        // 3rd failure: check for permafail
+    if (!isAiAnalysisEnabled(prKey)) {
+        // AI analysis is off for this PR: never spend an analysis run
+        return;
+    }
+
+    if (consecutiveFailures === failureThreshold) {
+        // Limit reached: check for permafail
         const jobUrls = job.urls || [];
 
-        if (jobUrls.length < PERMAFAIL_CHECK_THRESHOLD) {
+        if (jobUrls.length < failureThreshold) {
             // Not enough data, would allow retest (future enhancement)
             return;
         }
@@ -2378,8 +2593,8 @@ async function checkForPermafail(owner, repo, pr, jobName) {
         const allFailedJobs = [...(data.e2e?.failed || []), ...(data.payload?.failed || [])];
         const job = allFailedJobs.find(j => j.name === jobName);
 
-        if (job && job.consecutive >= PERMAFAIL_CHECK_THRESHOLD) {
-            // Job is still failed with 3+ consecutive failures - check for permafail
+        if (job && job.consecutive >= getFailureThreshold(`${owner}/${repo}/${pr}`)) {
+            // Job is still failed at or past the limit - check for permafail
             await handleFailedJob(job, job.consecutive, owner, repo, pr);
         }
     } catch (error) {

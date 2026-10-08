@@ -8,6 +8,11 @@ from datetime import datetime, UTC
 DB_PATH = os.environ.get('PR_CI_DASHBOARD_DB',
                          os.path.expanduser('~/.local/share/pr-ci-dashboard/dashboard.db'))
 
+# Consecutive failures that stop auto-retest (and trigger AI analysis when it is on)
+DEFAULT_FAILURE_THRESHOLD = 3
+MIN_FAILURE_THRESHOLD = 1
+MAX_FAILURE_THRESHOLD = 10
+
 
 def is_permafail_result(permafail_result):
     """Return the permafail verdict from current or legacy analysis result shapes.
@@ -122,13 +127,24 @@ def init_db(db_path=None):
             )
         """)
 
-        cursor.execute("""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS auto_retest (
                 pr_key TEXT PRIMARY KEY,
                 enabled BOOLEAN NOT NULL CHECK (enabled IN (0, 1)),
-                updated_at TIMESTAMP
+                updated_at TIMESTAMP,
+                ai_enabled BOOLEAN NOT NULL DEFAULT 0 CHECK (ai_enabled IN (0, 1)),
+                failure_threshold INTEGER NOT NULL DEFAULT {DEFAULT_FAILURE_THRESHOLD}
             )
         """)
+
+        # Migrate databases created before the per-PR AI switch and threshold
+        existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(auto_retest)")}
+        if 'ai_enabled' not in existing_columns:
+            cursor.execute("ALTER TABLE auto_retest ADD COLUMN "
+                           "ai_enabled BOOLEAN NOT NULL DEFAULT 0 CHECK (ai_enabled IN (0, 1))")
+        if 'failure_threshold' not in existing_columns:
+            cursor.execute("ALTER TABLE auto_retest ADD COLUMN failure_threshold "
+                           f"INTEGER NOT NULL DEFAULT {DEFAULT_FAILURE_THRESHOLD}")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS audit_log (
@@ -408,13 +424,14 @@ def delete_cached_analyses(job_urls, db_path=None):
 
 def get_auto_retest_state(db_path=None):
     """
-    Get auto-retest enablement for all PRs
+    Get auto-retest configuration for all PRs
 
     Args:
         db_path: Optional database path (defaults to DB_PATH)
 
     Returns:
-        dict: Map of pr_key ("owner/repo/number") -> bool
+        dict: Map of pr_key ("owner/repo/number") ->
+              {"enabled": bool, "ai_enabled": bool, "failure_threshold": int}
 
     Raises:
         RuntimeError: If database operation fails
@@ -425,8 +442,15 @@ def get_auto_retest_state(db_path=None):
         conn = sqlite3.connect(path)
         cursor = conn.cursor()
 
-        cursor.execute("SELECT pr_key, enabled FROM auto_retest")
-        return {row[0]: bool(row[1]) for row in cursor.fetchall()}
+        cursor.execute("SELECT pr_key, enabled, ai_enabled, failure_threshold FROM auto_retest")
+        return {
+            row[0]: {
+                "enabled": bool(row[1]),
+                "ai_enabled": bool(row[2]),
+                "failure_threshold": int(row[3]) if row[3] is not None else DEFAULT_FAILURE_THRESHOLD,
+            }
+            for row in cursor.fetchall()
+        }
     except sqlite3.Error as e:
         raise RuntimeError(f"Failed to get auto-retest state: {e}")
     finally:
@@ -434,28 +458,41 @@ def get_auto_retest_state(db_path=None):
             conn.close()
 
 
-def set_auto_retest_state(pr_key, enabled, db_path=None):
+def set_auto_retest_state(pr_key, enabled, ai_enabled=None, failure_threshold=None, db_path=None):
     """
-    Set auto-retest enablement for a PR
+    Set auto-retest configuration for a PR
 
     Args:
         pr_key: PR identifier ("owner/repo/number")
         enabled: Whether auto-retest is enabled
+        ai_enabled: Whether AI permafail analysis runs at the failure threshold.
+                    None keeps the stored value (default 0 for a new PR).
+        failure_threshold: Consecutive failures that stop auto-retest.
+                           None keeps the stored value (default DEFAULT_FAILURE_THRESHOLD).
         db_path: Optional database path (defaults to DB_PATH)
 
     Raises:
         RuntimeError: If database operation fails
     """
     path = db_path or DB_PATH
+    ai_value = None if ai_enabled is None else (1 if ai_enabled else 0)
+    threshold_value = None if failure_threshold is None else int(failure_threshold)
     conn = None
     try:
         conn = sqlite3.connect(path)
         cursor = conn.cursor()
 
         cursor.execute("""
-            INSERT OR REPLACE INTO auto_retest (pr_key, enabled, updated_at)
-            VALUES (?, ?, ?)
-        """, (pr_key, 1 if enabled else 0, datetime.now(UTC).isoformat()))
+            INSERT INTO auto_retest (pr_key, enabled, updated_at, ai_enabled, failure_threshold)
+            VALUES (?, ?, ?, COALESCE(?, 0), COALESCE(?, ?))
+            ON CONFLICT(pr_key) DO UPDATE SET
+                enabled = excluded.enabled,
+                updated_at = excluded.updated_at,
+                ai_enabled = COALESCE(?, auto_retest.ai_enabled),
+                failure_threshold = COALESCE(?, auto_retest.failure_threshold)
+        """, (pr_key, 1 if enabled else 0, datetime.now(UTC).isoformat(),
+              ai_value, threshold_value, DEFAULT_FAILURE_THRESHOLD,
+              ai_value, threshold_value))
 
         conn.commit()
     except sqlite3.Error as e:

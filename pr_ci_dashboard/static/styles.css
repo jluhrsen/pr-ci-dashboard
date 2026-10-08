@@ -141,6 +141,10 @@ h1 {
 }
 
 .auto-retest-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 1rem;
     padding: 0.5rem;
     background: #f8f9fa;
     border-radius: 4px;
@@ -156,14 +160,41 @@ h1 {
     user-select: none;
 }
 
-.auto-retest-toggle {
+.auto-retest-toggle,
+.ai-analysis-toggle {
     margin-right: 0.4rem;
     cursor: pointer;
 }
 
-.auto-retest-toggle:disabled {
+.auto-retest-toggle:disabled,
+.ai-analysis-toggle:disabled {
     cursor: not-allowed;
     opacity: 0.5;
+}
+
+.failure-threshold-label {
+    cursor: default;
+}
+
+.failure-threshold-input {
+    width: 3.2rem;
+    margin: 0 0.3rem;
+    padding: 0.1rem 0.2rem;
+    font-size: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+}
+
+.retest-limit-badge {
+    margin-left: 8px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #fdecea;
+    border: 1px solid #f5c2c7;
+    color: #842029;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: help;
 }
 
 .job-sections-container {

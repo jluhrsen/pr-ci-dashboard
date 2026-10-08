@@ -91,10 +91,12 @@ problems are tracked in
 
 ### Auto-retest
 
-The `auto_retest` table stores a global enabled flag by
-`owner/repo/PR-number`. Every browser loads these rows and starts its own
-30-second polling interval. State transitions, cooldowns, and failure counters
-live only in JavaScript memory.
+The `auto_retest` table stores, by `owner/repo/PR-number`, the enabled flag,
+the AI permafail analysis switch (off by default), and the consecutive-failure
+limit that stops retesting (default 3, range 1–10). Every browser loads these
+rows and starts its own 30-second polling interval. State transitions,
+cooldowns, failure counters, and retest-limit marks live only in JavaScript
+memory.
 
 This means automation needs an open browser and is not coordinated between
 tabs or users. The design should move to a server-owned, idempotent coordinator
@@ -139,7 +141,7 @@ helpers' JSON output directly.
 | `POST /api/jobs/override` | Override a cached permafail |
 | `POST /api/jobs/delete-cache` | Remove cached results |
 | `GET /api/pr/.../permafails` | Cached permafails for one PR |
-| `GET/POST /api/auto-retest` | Read or change enabled monitors |
+| `GET/POST /api/auto-retest` | Read or change monitors, AI switch, failure limit |
 | `GET /api/audit` | Read recent audit entries |
 | `/api/github/oauth/*` | GitHub device-flow lifecycle |
 | `/api/google/oauth/*` | Google login lifecycle |
@@ -155,7 +157,7 @@ bind is tracked in
 SQLite contains three tables:
 
 - `job_analyses(job_url primary key, ...)`;
-- `auto_retest(pr_key primary key, enabled, updated_at)`;
+- `auto_retest(pr_key primary key, enabled, updated_at, ai_enabled, failure_threshold)`;
 - `audit_log(id, timestamp, actor, action, target, result)`.
 
 GitHub tokens, Google ADC dictionaries, pending device flows, rate-limit
